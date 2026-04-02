@@ -3,6 +3,10 @@
  * Tests pure state-checking functions with no database access.
  */
 
+/// <reference types="jest" />
+export {};
+import { describe, expect, test } from "@jest/globals";
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface UserLike {

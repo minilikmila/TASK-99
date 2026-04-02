@@ -3,6 +3,10 @@
  * Validates pure business logic without database access.
  */
 
+/// <reference types="jest" />
+export {};
+import { describe, expect, test } from "@jest/globals";
+
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
 interface AuditEventLike {

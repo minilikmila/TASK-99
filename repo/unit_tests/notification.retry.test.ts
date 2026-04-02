@@ -3,6 +3,8 @@
  * Tests pure business rules without database access.
  */
 
+export {};
+
 // ─── Retry backoff schedule ───────────────────────────────────────────────────
 
 const MAX_RETRIES = 3;

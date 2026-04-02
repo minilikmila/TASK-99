@@ -3,6 +3,8 @@
  * Tests the lockout window and attempt-counting rules.
  */
 
+export {};
+
 const LOCKOUT_ATTEMPTS = 5;
 const LOCKOUT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 

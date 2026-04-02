@@ -48,6 +48,15 @@ ok()      { echo -e "${GREEN}✔  $*${RESET}"; }
 fail()    { echo -e "${RED}✖  $*${RESET}"; }
 warn()    { echo -e "${YELLOW}⚠  $*${RESET}"; }
 
+# Ensure local dev dependencies exist before running host-side jest commands.
+ensure_local_test_deps() {
+  if [ ! -x "node_modules/.bin/jest" ]; then
+    section "Installing local test dependencies (npm ci)"
+    npm ci
+    ok "Dependencies installed"
+  fi
+}
+
 # Only treat the port as "our" test server if health JSON matches this app
 # (avoids false positives when another stack already listens on the test port).
 civicforum_health_ok() {
@@ -110,6 +119,7 @@ trap cleanup EXIT
 
 # ─── Unit tests ───────────────────────────────────────────────────────────────
 if $RUN_UNIT; then
+  ensure_local_test_deps
   section "Running unit tests"
   set +e
   npm run test:unit
@@ -124,6 +134,7 @@ fi
 
 # ─── API tests ────────────────────────────────────────────────────────────────
 if $RUN_API; then
+  ensure_local_test_deps
 
   # Start compose unless a real CivicForum health endpoint is already up on TEST_BASE_URL
   if civicforum_health_ok; then

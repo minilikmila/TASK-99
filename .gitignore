@@ -1,0 +1,35 @@
+### Task workspace artifacts
+session.jsonl
+convert_ai_session.py
+
+### Node / TypeScript
+node_modules/
+repo/node_modules/
+dist/
+repo/dist/
+.turbo/
+.cache/
+
+### Prisma generated / migrations
+prisma/migrations/**/migration_lock.toml
+
+### Env / secrets
+.env
+.env.*
+*.pem
+*.key
+
+### Logs
+*.log
+logs/
+
+### IDE / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+### Temporary analysis output
+repo/.tmp/
+tmp/
+

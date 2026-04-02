@@ -1,0 +1,408 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMINISTRATOR
+  MODERATOR
+  ANALYST
+  USER
+}
+
+enum ThreadState {
+  ACTIVE
+  LOCKED
+  ARCHIVED
+}
+
+enum RecycleBinItemType {
+  THREAD
+  REPLY
+}
+
+enum NotificationStatus {
+  PENDING
+  DELIVERED
+  FAILED
+  OPENED
+}
+
+enum RiskFlagStatus {
+  OPEN
+  REVIEWED
+  DISMISSED
+}
+
+// ─── Core Tenant ──────────────────────────────────────────────────────────────
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users                  User[]
+  sections               Section[]
+  tags                   Tag[]
+  threads                Thread[]
+  announcements          Announcement[]
+  carouselItems          CarouselItem[]
+  venues                 Venue[]
+  notifications          Notification[]
+  auditLogs              AuditLog[]
+  eventLogs              EventLog[]
+  riskFlags              RiskFlag[]
+  featureFlags           FeatureFlag[]
+}
+
+// ─── Identity ─────────────────────────────────────────────────────────────────
+
+model User {
+  id             String    @id @default(cuid())
+  organizationId String
+  username       String
+  passwordHash   String
+  role           Role      @default(USER)
+  isBanned       Boolean   @default(false)
+  muteUntil      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization              Organization               @relation(fields: [organizationId], references: [id])
+  threads                   Thread[]
+  replies                   Reply[]
+  loginAttempts             LoginAttempt[]
+  notificationSubscriptions NotificationSubscription[]
+  notifications             Notification[]
+
+  @@unique([organizationId, username])
+  @@index([organizationId])
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  userId    String?
+  username  String
+  orgSlug   String
+  success   Boolean
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([username, orgSlug, createdAt(sort: Desc)])
+}
+
+// ─── Forum Taxonomy ───────────────────────────────────────────────────────────
+
+model Section {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  subsections  Subsection[]
+  threads      Thread[]
+
+  @@index([organizationId])
+}
+
+model Subsection {
+  id        String   @id @default(cuid())
+  sectionId String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  section Section  @relation(fields: [sectionId], references: [id])
+  threads Thread[]
+}
+
+model Tag {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  slug           String
+  deletedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  threads      ThreadTag[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+}
+
+// ─── Forum Content ────────────────────────────────────────────────────────────
+
+model Thread {
+  id             String      @id @default(cuid())
+  organizationId String
+  sectionId      String
+  subsectionId   String?
+  authorId       String
+  title          String
+  body           String
+  state          ThreadState @default(ACTIVE)
+  isPinned       Boolean     @default(false)
+  isFeatured     Boolean     @default(false)
+  deletedAt      DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  section        Section         @relation(fields: [sectionId], references: [id])
+  subsection     Subsection?     @relation(fields: [subsectionId], references: [id])
+  author         User            @relation(fields: [authorId], references: [id])
+  replies        Reply[]
+  tags           ThreadTag[]
+  recycleBinItem RecycleBinItem?
+
+  @@index([organizationId, sectionId, state, createdAt(sort: Desc)])
+  @@index([organizationId, isPinned])
+}
+
+model Reply {
+  id             String    @id @default(cuid())
+  organizationId String
+  threadId       String
+  authorId       String
+  parentReplyId  String?
+  depth          Int       @default(1)
+  body           String
+  deletedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  thread         Thread          @relation(fields: [threadId], references: [id])
+  author         User            @relation(fields: [authorId], references: [id])
+  parentReply    Reply?          @relation("ReplyNesting", fields: [parentReplyId], references: [id])
+  childReplies   Reply[]         @relation("ReplyNesting")
+  recycleBinItem RecycleBinItem?
+
+  @@index([organizationId, threadId, parentReplyId, createdAt])
+}
+
+model ThreadTag {
+  threadId String
+  tagId    String
+
+  thread Thread @relation(fields: [threadId], references: [id])
+  tag    Tag    @relation(fields: [tagId], references: [id])
+
+  @@id([threadId, tagId])
+}
+
+// ─── Recycle Bin ──────────────────────────────────────────────────────────────
+
+model RecycleBinItem {
+  id          String             @id @default(cuid())
+  itemType    RecycleBinItemType
+  threadId    String?            @unique
+  replyId     String?            @unique
+  deletedById String
+  deletedAt   DateTime           @default(now())
+  expiresAt   DateTime
+
+  thread Thread? @relation(fields: [threadId], references: [id])
+  reply  Reply?  @relation(fields: [replyId], references: [id])
+
+  @@index([expiresAt])
+}
+
+// ─── Admin Configuration ──────────────────────────────────────────────────────
+
+model Announcement {
+  id             String    @id @default(cuid())
+  organizationId String
+  title          String
+  body           String
+  order          Int       @default(0)
+  startAt        DateTime?
+  endAt          DateTime?
+  isPublished    Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, isPublished])
+}
+
+model CarouselItem {
+  id             String    @id @default(cuid())
+  organizationId String
+  title          String
+  imageUrl       String?
+  linkUrl        String?
+  order          Int       @default(0)
+  startAt        DateTime?
+  endAt          DateTime?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+}
+
+model Venue {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  capacity       Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id])
+  bookings     VenueBooking[]
+
+  @@index([organizationId])
+}
+
+model VenueBooking {
+  id         String   @id @default(cuid())
+  venueId    String
+  bookedById String
+  title      String
+  startAt    DateTime
+  endAt      DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  venue Venue @relation(fields: [venueId], references: [id])
+
+  @@index([venueId, startAt, endAt])
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+
+model Notification {
+  id             String             @id @default(cuid())
+  organizationId String
+  userId         String
+  category       String
+  title          String
+  body           String
+  status         NotificationStatus @default(PENDING)
+  retryCount     Int                @default(0)
+  scheduledAt    DateTime
+  deliveredAt    DateTime?
+  openedAt       DateTime?
+  nextRetryAt    DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, userId])
+  @@index([status, scheduledAt])
+  @@index([status, nextRetryAt])
+}
+
+model NotificationSubscription {
+  id       String  @id @default(cuid())
+  userId   String
+  category String
+  isOptIn  Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, category])
+}
+
+// ─── Audit & Analytics ────────────────────────────────────────────────────────
+
+// Append-only: no update/delete operations on this table
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  actorId        String?
+  eventType      String
+  resourceType   String?
+  resourceId     String?
+  details        Json?
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, eventType, createdAt(sort: Desc)])
+  @@index([organizationId, actorId, createdAt(sort: Desc)])
+}
+
+model EventLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String?
+  eventType      String
+  resourceType   String?
+  resourceId     String?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, eventType, createdAt(sort: Desc)])
+}
+
+// ─── Risk Detection ───────────────────────────────────────────────────────────
+
+model RiskFlag {
+  id             String         @id @default(cuid())
+  organizationId String
+  subjectId      String
+  subjectType    String
+  rule           String
+  status         RiskFlagStatus @default(OPEN)
+  details        Json?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, status])
+}
+
+// ─── Token Revocation ────────────────────────────────────────────────────────
+
+model RevokedToken {
+  id        String   @id @default(uuid())
+  jti       String   @unique
+  expiresAt DateTime
+  revokedAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+
+model FeatureFlag {
+  id             String   @id @default(cuid())
+  organizationId String
+  key            String
+  value          Boolean  @default(false)
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, key])
+}

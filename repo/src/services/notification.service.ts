@@ -176,12 +176,20 @@ export async function dispatchDueNotifications(): Promise<number> {
         notificationId: n.id,
         error: (err as Error).message,
       });
-      // Mark as FAILED so the retry worker picks it up with exponential backoff
+      // Mark as FAILED so the retry worker picks it up with exponential backoff.
+      // Do NOT increment retryCount here — the retry worker is the sole counter
+      // to ensure "up to 3 retries" means 3 actual re-delivery attempts.
       try {
-        const delays = await getRetryDelays(n.organizationId);
-        const delayMinutes = delays[0] ?? 1;
-        const nextRetryAt = new Date(now.getTime() + delayMinutes * 60_000);
-        await notificationRepository.markFailed(n.id, n.retryCount + 1, nextRetryAt);
+        const maxRetries = await getConfigValue(n.organizationId, CONFIG_KEYS.NOTIFICATION_MAX_RETRIES);
+        if (n.retryCount >= maxRetries) {
+          // All retries exhausted — mark as permanently failed (no nextRetryAt)
+          await notificationRepository.markFailed(n.id, n.retryCount, null);
+        } else {
+          const delays = await getRetryDelays(n.organizationId);
+          const delayMinutes = delays[n.retryCount] ?? delays.at(-1) ?? 1;
+          const nextRetryAt = new Date(now.getTime() + delayMinutes * 60_000);
+          await notificationRepository.markFailed(n.id, n.retryCount, nextRetryAt);
+        }
       } catch (markErr) {
         logger.error("Failed to mark notification as FAILED", {
           notificationId: n.id,
@@ -220,25 +228,22 @@ export async function retryFailedNotifications(): Promise<number> {
 
     const windowStart = new Date(now.getTime() - windowHours * 3_600_000);
     const failed = await notificationRepository.findFailedForRetry(
+      org.id,
       maxRetries,
       windowStart,
       now
     );
 
     for (const n of failed) {
-      if (n.organizationId !== org.id) continue;
-
       const newCount = n.retryCount + 1;
       const delayMinutes = delays[newCount - 1] ?? delays.at(-1) ?? 30;
       const nextRetryAt = new Date(now.getTime() + delayMinutes * 60_000);
 
       try {
-        if (newCount >= maxRetries) {
-          // Final attempt exhausted — mark as permanently failed
-          await notificationRepository.markFailed(n.id, newCount, null);
-        } else {
-          await notificationRepository.scheduleRetry(n.id, newCount, nextRetryAt);
-        }
+        // Always re-queue for another dispatch attempt. The dispatch worker
+        // will mark permanently FAILED if retryCount >= maxRetries after
+        // the final delivery attempt fails.
+        await notificationRepository.scheduleRetry(n.id, newCount, nextRetryAt);
         retried++;
       } catch (err) {
         logger.error("Retry update failed", {

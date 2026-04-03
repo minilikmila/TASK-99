@@ -15,12 +15,12 @@ import * as adminService from "../services/admin.service";
 // ─── Organizations ────────────────────────────────────────────────────────────
 
 export async function handleListOrgs(
-  _req: Request,
+  req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const orgs = await adminService.listOrganizations();
+    const orgs = await adminService.listOrganizations(req.user!.organizationId);
     res.json({ data: orgs });
   } catch (err) {
     next(err);

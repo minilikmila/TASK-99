@@ -24,6 +24,7 @@ export async function banUser(
   ipAddress?: string
 ): Promise<User> {
   const target = await resolveOrgUser(targetUserId, organizationId);
+  await enforceRoleHierarchy(actorId, target, organizationId);
 
   const updated = await userRepository.update(targetUserId, {
     isBanned: true,
@@ -50,7 +51,8 @@ export async function unbanUser(
   actorId: string,
   ipAddress?: string
 ): Promise<User> {
-  await resolveOrgUser(targetUserId, organizationId);
+  const target = await resolveOrgUser(targetUserId, organizationId);
+  await enforceRoleHierarchy(actorId, target, organizationId);
 
   const updated = await userRepository.update(targetUserId, {
     isBanned: false,
@@ -80,7 +82,8 @@ export async function muteUser(
   input: MuteInput,
   ipAddress?: string
 ): Promise<User> {
-  await resolveOrgUser(targetUserId, organizationId);
+  const target = await resolveOrgUser(targetUserId, organizationId);
+  await enforceRoleHierarchy(actorId, target, organizationId);
 
   const muteUntil = new Date(Date.now() + input.durationHours * 3_600_000);
   const updated = await userRepository.update(targetUserId, {
@@ -116,7 +119,8 @@ export async function unmuteUser(
   actorId: string,
   ipAddress?: string
 ): Promise<User> {
-  await resolveOrgUser(targetUserId, organizationId);
+  const target = await resolveOrgUser(targetUserId, organizationId);
+  await enforceRoleHierarchy(actorId, target, organizationId);
 
   const updated = await userRepository.update(targetUserId, {
     muteUntil: null,
@@ -196,6 +200,18 @@ export async function bulkContentAction(
         resourceType: "Thread",
         resourceId: threadId,
       });
+
+      // Emit per-entity event so risk engine aggregation counts bulk operations.
+      // e.g. bulk_delete_threads also emits thread.deleted for each thread.
+      if (input.action === "delete_threads") {
+        await auditRepository.create({
+          organizationId,
+          actorId,
+          eventType: "thread.deleted",
+          resourceType: "Thread",
+          resourceId: threadId,
+        });
+      }
 
       results.push({ id: threadId, status: "ok" });
     } catch (err) {
@@ -367,4 +383,21 @@ async function resolveOrgUser(userId: string, organizationId: string): Promise<U
     throw new AppError(404, ErrorCode.NOT_FOUND, "User not found");
   }
   return user;
+}
+
+async function enforceRoleHierarchy(
+  actorId: string,
+  target: User,
+  organizationId: string
+): Promise<void> {
+  if (target.role === "ADMINISTRATOR") {
+    const actor = await resolveOrgUser(actorId, organizationId);
+    if (actor.role !== "ADMINISTRATOR") {
+      throw new AppError(
+        403,
+        ErrorCode.FORBIDDEN,
+        "Only administrators can ban or mute other administrators"
+      );
+    }
+  }
 }

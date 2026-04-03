@@ -11,7 +11,8 @@
       "Bash(npx jest:*)",
       "Bash(TEST_BASE_URL=http://localhost:3011 npx jest --testPathPattern=\"API_tests/thread-report\" --verbose --forceExit --runInBand)",
       "Bash(TEST_BASE_URL=http://localhost:3011 npx jest --testPathPattern=API_tests --forceExit --runInBand)",
-      "Bash(TEST_BASE_URL=http://localhost:3011 npx jest --testPathPattern=\"API_tests/threads\" --verbose --forceExit --runInBand)"
+      "Bash(TEST_BASE_URL=http://localhost:3011 npx jest --testPathPattern=\"API_tests/threads\" --verbose --forceExit --runInBand)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

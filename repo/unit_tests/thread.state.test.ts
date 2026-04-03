@@ -1,25 +1,9 @@
 /**
  * Unit tests for thread state transition rules.
- * Tests validate pure business logic without database access.
+ * Imports production functions directly from the thread-state lib module.
  */
 
-type ThreadState = "ACTIVE" | "LOCKED" | "ARCHIVED";
-
-const ALLOWED_TRANSITIONS: Record<ThreadState, ThreadState[]> = {
-  ACTIVE: ["LOCKED", "ARCHIVED"],
-  LOCKED: ["ARCHIVED"],
-  ARCHIVED: [],
-};
-
-function canTransition(from: ThreadState, to: ThreadState): boolean {
-  return ALLOWED_TRANSITIONS[from].includes(to);
-}
-
-function assertTransitionAllowed(from: ThreadState, to: ThreadState): void {
-  if (!canTransition(from, to)) {
-    throw new Error(`Cannot transition thread from ${from} to ${to}`);
-  }
-}
+import { canTransition, assertTransitionAllowed } from "../src/lib/thread-state";
 
 describe("Thread State Transitions — allowed", () => {
   test("ACTIVE → LOCKED", () =>

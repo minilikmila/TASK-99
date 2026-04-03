@@ -4,6 +4,7 @@ import {
   handleDispatchDue,
   handleRetryFailed,
 } from "../controllers/notifications.controller";
+import { handleRunRiskRules } from "../controllers/internal-jobs.controller";
 
 const router = Router();
 
@@ -19,5 +20,6 @@ router.post(
   internalAuth,
   handleRetryFailed
 );
+router.post("/internal/risk/run-rules", internalAuth, handleRunRiskRules);
 
 export default router;

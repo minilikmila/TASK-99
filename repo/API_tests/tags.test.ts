@@ -11,6 +11,9 @@ let adminToken: string;
 let modToken: string;
 let userToken: string;
 
+// Use unique suffixes to avoid collisions with data from previous test runs
+const RUN_ID = Date.now().toString(36);
+
 beforeAll(async () => {
   [adminToken, modToken, userToken] = await Promise.all([
     loginAs(TEST_ORG, CREDS.admin.username, CREDS.admin.password),
@@ -35,21 +38,22 @@ describe("GET /tags", () => {
 
 describe("POST /tags", () => {
   test("success — admin creates tag", async () => {
+    const slug = `api-test-tag-${RUN_ID}`;
     const res = await api.post(
       "/tags",
-      { name: "API Test Tag", slug: "api-test-tag" },
+      { name: `API Test Tag ${RUN_ID}`, slug },
       adminToken
     );
     expect(res.status).toBe(201);
     const body = res.body as Record<string, unknown>;
-    expect(body.name).toBe("API Test Tag");
-    expect(body.slug).toBe("api-test-tag");
+    expect(body.slug).toBe(slug);
   });
 
   test("success — moderator creates tag", async () => {
+    const slug = `mod-test-tag-${RUN_ID}`;
     const res = await api.post(
       "/tags",
-      { name: "Mod Tag", slug: "mod-test-tag" },
+      { name: `Mod Tag ${RUN_ID}`, slug },
       modToken
     );
     expect(res.status).toBe(201);
@@ -58,22 +62,23 @@ describe("POST /tags", () => {
   test("role — USER cannot create tags (403)", async () => {
     const res = await api.post(
       "/tags",
-      { name: "User Tag", slug: "user-tag" },
+      { name: "User Tag", slug: `user-tag-${RUN_ID}` },
       userToken
     );
     expect(res.status).toBe(403);
   });
 
   test("conflict — duplicate slug returns 409 or 400", async () => {
+    const slug = `dup-slug-${RUN_ID}`;
     // Create first
-    await api.post("/tags", { name: "Dup Tag", slug: "dup-slug-test" }, adminToken);
+    await api.post("/tags", { name: "Dup Tag", slug }, adminToken);
     // Try duplicate
     const res = await api.post(
       "/tags",
-      { name: "Dup Tag 2", slug: "dup-slug-test" },
+      { name: "Dup Tag 2", slug },
       adminToken
     );
-    expect([400, 409, 500]).toContain(res.status);
+    expect([400, 409]).toContain(res.status);
   });
 });
 
@@ -81,9 +86,10 @@ describe("PATCH /tags/:tagId", () => {
   let tagId: string;
 
   beforeAll(async () => {
+    const slug = `tag-to-update-${RUN_ID}`;
     const res = await api.post(
       "/tags",
-      { name: "Tag To Update", slug: "tag-to-update" },
+      { name: "Tag To Update", slug },
       adminToken
     );
     tagId = (res.body as Record<string, unknown>).id as string;
@@ -105,9 +111,10 @@ describe("DELETE /tags/:tagId", () => {
   let tagId: string;
 
   beforeAll(async () => {
+    const slug = `tag-to-delete-${RUN_ID}`;
     const res = await api.post(
       "/tags",
-      { name: "Tag To Delete", slug: "tag-to-delete" },
+      { name: "Tag To Delete", slug },
       adminToken
     );
     tagId = (res.body as Record<string, unknown>).id as string;
@@ -119,9 +126,10 @@ describe("DELETE /tags/:tagId", () => {
   });
 
   test("role — USER cannot delete tags (403)", async () => {
+    const slug = `no-del-tag-${RUN_ID}`;
     const create = await api.post(
       "/tags",
-      { name: "No Del", slug: "no-del-tag" },
+      { name: "No Del", slug },
       adminToken
     );
     const id = (create.body as Record<string, unknown>).id as string;

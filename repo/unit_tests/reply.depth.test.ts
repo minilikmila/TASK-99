@@ -1,24 +1,13 @@
 /**
  * Unit tests for reply nesting depth enforcement.
- * Validates depth calculation and max-depth rejection logic
- * as implemented in forum.service.ts.
+ * Imports production functions from src/lib/reply-depth.ts.
  */
+
+import { computeDepth, assertDepthAllowed } from "../src/lib/reply-depth";
 
 const MAX_REPLY_DEPTH = 3;
 
-function computeDepth(parentDepth: number | null): number {
-  return parentDepth === null ? 1 : parentDepth + 1;
-}
-
-function assertDepthAllowed(depth: number): void {
-  if (depth > MAX_REPLY_DEPTH) {
-    throw new Error(
-      `Reply nesting exceeds the maximum depth of ${MAX_REPLY_DEPTH}`
-    );
-  }
-}
-
-describe("Reply depth computation", () => {
+describe("Reply depth computation (production module)", () => {
   test("Root reply (no parent) has depth 1", () =>
     expect(computeDepth(null)).toBe(1));
 
@@ -32,30 +21,28 @@ describe("Reply depth computation", () => {
     expect(computeDepth(3)).toBe(4));
 });
 
-describe("Reply depth enforcement (assertDepthAllowed)", () => {
+describe("Reply depth enforcement (production module)", () => {
   test("depth 1 is allowed", () =>
-    expect(() => assertDepthAllowed(1)).not.toThrow());
+    expect(() => assertDepthAllowed(1, MAX_REPLY_DEPTH)).not.toThrow());
 
   test("depth 3 is allowed (exactly at limit)", () =>
-    expect(() => assertDepthAllowed(3)).not.toThrow());
+    expect(() => assertDepthAllowed(3, MAX_REPLY_DEPTH)).not.toThrow());
 
   test("depth 4 is rejected", () =>
-    expect(() => assertDepthAllowed(4)).toThrow(/maximum depth of 3/));
+    expect(() => assertDepthAllowed(4, MAX_REPLY_DEPTH)).toThrow(/maximum depth of 3/));
 
   test("depth 5 is rejected", () =>
-    expect(() => assertDepthAllowed(5)).toThrow(/maximum depth of 3/));
+    expect(() => assertDepthAllowed(5, MAX_REPLY_DEPTH)).toThrow(/maximum depth of 3/));
 });
 
 describe("Reply creation depth path", () => {
   test("replying to a depth-3 reply is blocked", () => {
-    const parentDepth = 3;
-    const newDepth = computeDepth(parentDepth);
-    expect(() => assertDepthAllowed(newDepth)).toThrow();
+    const newDepth = computeDepth(3);
+    expect(() => assertDepthAllowed(newDepth, MAX_REPLY_DEPTH)).toThrow();
   });
 
   test("replying to a depth-2 reply is allowed", () => {
-    const parentDepth = 2;
-    const newDepth = computeDepth(parentDepth);
-    expect(() => assertDepthAllowed(newDepth)).not.toThrow();
+    const newDepth = computeDepth(2);
+    expect(() => assertDepthAllowed(newDepth, MAX_REPLY_DEPTH)).not.toThrow();
   });
 });

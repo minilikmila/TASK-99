@@ -1,4 +1,4 @@
-import { ThreadState, Thread } from "@prisma/client";
+import { Thread, ThreadState } from "@prisma/client";
 import { threadRepository, ThreadWithIncludes } from "../repositories/thread.repository";
 import { replyRepository, ReplyWithAuthor } from "../repositories/reply.repository";
 import { recycleRepository } from "../repositories/recycle.repository";
@@ -21,15 +21,12 @@ import type { CreateReplyInput, UpdateReplyInput } from "../schemas/reply.schema
 
 // ─── Thread state machine ─────────────────────────────────────────────────────
 
-const ALLOWED_TRANSITIONS: Partial<Record<ThreadState, ThreadState[]>> = {
-  ACTIVE: [ThreadState.LOCKED, ThreadState.ARCHIVED],
-  LOCKED: [ThreadState.ARCHIVED],
-  ARCHIVED: [], // irreversible
-};
+import {
+  canTransition as canTransitionPure,
+} from "../lib/thread-state";
 
 function assertTransitionAllowed(from: ThreadState, to: ThreadState): void {
-  const allowed = ALLOWED_TRANSITIONS[from] ?? [];
-  if (!allowed.includes(to)) {
+  if (!canTransitionPure(from, to)) {
     throw new AppError(
       422,
       ErrorCode.INVALID_STATE_TRANSITION,
@@ -225,19 +222,31 @@ export async function pinThread(
   }
 
   const maxPinned = await getConfigValue(organizationId, CONFIG_KEYS.MAX_PINNED_PER_SECTION);
-  const pinnedCount = await threadRepository.countPinned(
-    organizationId,
-    thread.sectionId
-  );
-  if (pinnedCount >= maxPinned) {
-    throw new AppError(
-      409,
-      ErrorCode.PIN_LIMIT_REACHED,
-      `Section already has the maximum of ${maxPinned} pinned threads`
-    );
-  }
 
-  const updated = await threadRepository.update(threadId, { isPinned: true });
+  // Use serializable transaction to prevent race condition on pin limit.
+  // Without this, two concurrent pin requests could both read count=2 (max=3)
+  // and both succeed, resulting in 4 pinned threads.
+  const updated = await prisma.$transaction(async (tx) => {
+    const pinnedCount = await tx.thread.count({
+      where: {
+        organizationId,
+        sectionId: thread.sectionId,
+        isPinned: true,
+        deletedAt: null,
+      },
+    });
+    if (pinnedCount >= maxPinned) {
+      throw new AppError(
+        409,
+        ErrorCode.PIN_LIMIT_REACHED,
+        `Section already has the maximum of ${maxPinned} pinned threads`
+      );
+    }
+    return tx.thread.update({
+      where: { id: threadId },
+      data: { isPinned: true },
+    });
+  }, { isolationLevel: "Serializable" });
 
   await auditRepository.create({
     organizationId,

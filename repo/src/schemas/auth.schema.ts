@@ -9,3 +9,11 @@ export const loginSchema = z.object({
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;
+
+export const provisionUserSchema = z.object({
+  username: z.string().min(1).max(100),
+  password: z.string().min(12, "Password must be at least 12 characters"),
+  role: z.enum(["ADMINISTRATOR", "MODERATOR", "ANALYST", "USER"]).default("USER"),
+});
+
+export type ProvisionUserInput = z.infer<typeof provisionUserSchema>;

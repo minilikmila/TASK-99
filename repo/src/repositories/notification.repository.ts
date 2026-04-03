@@ -38,6 +38,7 @@ export const notificationRepository = {
   },
 
   async findFailedForRetry(
+    organizationId: string,
     maxRetries: number,
     windowStart: Date,
     now: Date,
@@ -45,6 +46,7 @@ export const notificationRepository = {
   ): Promise<Notification[]> {
     return prisma.notification.findMany({
       where: {
+        organizationId,
         status: NotificationStatus.FAILED,
         retryCount: { lt: maxRetries },
         createdAt: { gte: windowStart },

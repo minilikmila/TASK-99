@@ -1,5 +1,7 @@
 import { AuditLog, Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { maskIp } from "../lib/logger";
+import { encryptField, decryptField } from "../lib/encryption";
 
 export interface CreateAuditInput {
   organizationId: string;
@@ -36,7 +38,7 @@ export const auditRepository = {
         resourceType: data.resourceType,
         resourceId: data.resourceId,
         details: (data.details ?? {}) as Prisma.InputJsonValue,
-        ipAddress: data.ipAddress,
+        ipAddress: data.ipAddress ? encryptField(maskIp(data.ipAddress)) : undefined,
       },
     });
   },
@@ -71,6 +73,12 @@ export const auditRepository = {
       prisma.auditLog.count({ where }),
     ]);
 
-    return { data, total };
+    // Decrypt IP addresses for display
+    const decrypted = data.map((log) => ({
+      ...log,
+      ipAddress: log.ipAddress ? decryptField(log.ipAddress) : null,
+    }));
+
+    return { data: decrypted, total };
   },
 };

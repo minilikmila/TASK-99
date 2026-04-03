@@ -137,6 +137,76 @@ describe("Exponential backoff delay schedule", () => {
   });
 });
 
+// ─── Full retry lifecycle: exactly 3 retries ─────────────────────────────────
+
+describe("Notification retry lifecycle — up to 3 retries", () => {
+  /**
+   * Simulates the full dispatch + retry lifecycle matching actual code:
+   *
+   * 1. dispatchDueNotifications: picks up PENDING, attempts delivery.
+   *    On failure → marks FAILED. Does NOT increment retryCount.
+   *    If retryCount >= maxRetries → permanently fails (null nextRetryAt).
+   * 2. retryFailedNotifications: picks up FAILED where retryCount < maxRetries.
+   *    Always increments retryCount and re-queues as PENDING for another dispatch.
+   *
+   * With maxRetries=3:
+   *   Dispatch #1 (retryCount=0, fails) → FAILED → retry increments to 1, re-queues
+   *   Dispatch #2 (retryCount=1, fails) → FAILED → retry increments to 2, re-queues
+   *   Dispatch #3 (retryCount=2, fails) → FAILED → retry increments to 3, re-queues
+   *   Dispatch #4 (retryCount=3, fails) → permanently FAILED (3 >= 3)
+   * Total: 4 delivery attempts = 1 initial + 3 retries ✓
+   */
+  interface LifecycleState {
+    status: "PENDING" | "FAILED" | "DELIVERED";
+    retryCount: number;
+    deliveryAttempts: number;
+  }
+
+  function simulateLifecycle(maxRetries: number): LifecycleState {
+    let state: LifecycleState = { status: "PENDING", retryCount: 0, deliveryAttempts: 0 };
+
+    for (let cycle = 0; cycle < 20; cycle++) {
+      if (state.status !== "PENDING") break;
+
+      // ── Dispatch worker: attempt delivery ──
+      state.deliveryAttempts++;
+      state.status = "FAILED";
+      // dispatch does NOT increment retryCount
+
+      // If retries exhausted, dispatch marks permanently failed
+      if (state.retryCount >= maxRetries) break;
+
+      // ── Retry worker: increment count and re-queue ──
+      // (picks up FAILED where retryCount < maxRetries)
+      state.retryCount++;
+      state.status = "PENDING"; // re-queued for next dispatch cycle
+    }
+
+    return state;
+  }
+
+  test("with maxRetries=3: 4 delivery attempts (1 initial + 3 retries)", () => {
+    const result = simulateLifecycle(3);
+    expect(result.deliveryAttempts).toBe(4);
+    expect(result.retryCount).toBe(3);
+    expect(result.status).toBe("FAILED");
+  });
+
+  test("with maxRetries=1: 2 delivery attempts (1 initial + 1 retry)", () => {
+    const result = simulateLifecycle(1);
+    expect(result.deliveryAttempts).toBe(2);
+    expect(result.retryCount).toBe(1);
+    expect(result.status).toBe("FAILED");
+  });
+
+  test("with maxRetries=0: 1 delivery attempt, no retries", () => {
+    const result = simulateLifecycle(0);
+    expect(result.deliveryAttempts).toBe(1);
+    expect(result.retryCount).toBe(0);
+    expect(result.status).toBe("FAILED");
+  });
+});
+
 // ─── Subscription opt-out enforcement ────────────────────────────────────────
 
 type Category = "reply" | "announcement" | "security" | string;

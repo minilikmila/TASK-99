@@ -268,6 +268,17 @@ describe("POST /threads/:id/state", () => {
 // ─── Pin / Unpin ──────────────────────────────────────────────────────────────
 
 describe("POST /threads/:id/pin — pin limit enforcement", () => {
+  // Clean up any stale pins in beta section from previous test runs
+  beforeAll(async () => {
+    const threads = await api.get("/threads", modToken, { sectionId: SECTION_IDS.beta });
+    const data = (threads.body as Record<string, unknown>).data as Array<Record<string, unknown>>;
+    for (const t of data) {
+      if (t.isPinned) {
+        await api.post(`/threads/${t.id}/unpin`, undefined, modToken);
+      }
+    }
+  });
+
   test("pin 3 threads in same section succeeds", async () => {
     for (const id of [pinThread1, pinThread2, pinThread3]) {
       const res = await api.post(`/threads/${id}/pin`, undefined, modToken);
@@ -289,7 +300,6 @@ describe("POST /threads/:id/pin — pin limit enforcement", () => {
   });
 
   test("unpin frees a slot", async () => {
-    // Unpin one
     const unpin = await api.post(`/threads/${pinThread3}/unpin`, undefined, modToken);
     expect(unpin.status).toBe(200);
     expect((unpin.body as Record<string, unknown>).isPinned).toBe(false);

@@ -3,16 +3,16 @@ services:
     image: mysql:8.0
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: civicforum
-      MYSQL_USER: civicforum
-      MYSQL_PASSWORD: civicforum
-      MYSQL_DATABASE: civicforum
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-civicforum}
+      MYSQL_USER: ${MYSQL_USER:-civicforum}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-civicforum}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-civicforum}
     command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     volumes:
       - mysql_data:/var/lib/mysql
       - backup_volume:/backups
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "civicforum", "-pcivicforum"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -27,18 +27,20 @@ services:
       db:
         condition: service_healthy
     environment:
-      NODE_ENV: production
+      # Default to development — set NODE_ENV=production in .env for production deployments
+      NODE_ENV: ${NODE_ENV:-development}
       PORT: 3000
-      DATABASE_URL: mysql://civicforum:civicforum@db:3306/civicforum
-      # All runtime config is self-contained in compose (no .env required).
-      JWT_SECRET: local-dev-jwt-secret-change-in-production-32chars-VALID-KEY-0123456789
-      JWT_EXPIRES_IN: 8h
-      RATE_LIMIT_WRITE_PER_MIN: 120
-      RATE_LIMIT_READ_PER_MIN: 600
-      LOGIN_LOCKOUT_ATTEMPTS: 5
-      LOGIN_LOCKOUT_WINDOW_MINUTES: 15
-      LOG_LEVEL: info
-      INTERNAL_API_KEY: local-dev-internal-api-key-VALID-KEY-0123456789abcdef
+      DATABASE_URL: mysql://${MYSQL_USER:-civicforum}:${MYSQL_PASSWORD:-civicforum}@db:3306/${MYSQL_DATABASE:-civicforum}
+      # REQUIRED in production: override these via .env file or shell environment.
+      # The application refuses to start in production if secrets are missing or weak.
+      JWT_SECRET: ${JWT_SECRET:-local-dev-jwt-secret-change-in-production-32chars-VALID-KEY-0123456789}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      RATE_LIMIT_WRITE_PER_MIN: ${RATE_LIMIT_WRITE_PER_MIN:-120}
+      RATE_LIMIT_READ_PER_MIN: ${RATE_LIMIT_READ_PER_MIN:-600}
+      LOGIN_LOCKOUT_ATTEMPTS: ${LOGIN_LOCKOUT_ATTEMPTS:-5}
+      LOGIN_LOCKOUT_WINDOW_MINUTES: ${LOGIN_LOCKOUT_WINDOW_MINUTES:-15}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-local-dev-internal-api-key-VALID-KEY-0123456789abcdef}
     ports:
       - "3000:3000"
     healthcheck:

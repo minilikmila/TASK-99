@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import { timingSafeEqual } from "crypto";
 import { AppError } from "./errorHandler";
 import { ErrorCode } from "../types";
 
@@ -22,7 +23,11 @@ export function internalAuth(
   }
 
   const provided = req.headers["x-internal-key"];
-  if (provided !== key) {
+  if (
+    typeof provided !== "string" ||
+    provided.length !== key.length ||
+    !timingSafeEqual(Buffer.from(provided), Buffer.from(key))
+  ) {
     throw new AppError(
       401,
       ErrorCode.UNAUTHORIZED,

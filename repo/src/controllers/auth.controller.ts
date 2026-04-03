@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-import { loginSchema } from "../schemas/auth.schema";
-import { login } from "../services/auth.service";
+import { loginSchema, provisionUserSchema } from "../schemas/auth.schema";
+import { login, provisionUser } from "../services/auth.service";
 import { userRepository } from "../repositories/user.repository";
 import { AppError } from "../middleware/errorHandler";
 import { ErrorCode } from "../types";
@@ -45,6 +45,24 @@ export async function handleLogout(
       }
     }
     res.status(200).json({ message: "Logged out successfully" });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function handleProvisionUser(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const input = provisionUserSchema.parse(req.body);
+    const user = await provisionUser(
+      req.user!.organizationId,
+      req.user!.id,
+      input
+    );
+    res.status(201).json(user);
   } catch (err) {
     next(err);
   }

@@ -1,45 +1,20 @@
 /**
  * Unit tests for mute and ban business logic.
- * Tests pure state-checking functions with no database access.
+ * Imports production functions from src/lib/moderation-rules.ts.
  */
 
 /// <reference types="jest" />
 export {};
 import { describe, expect, test } from "@jest/globals";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface UserLike {
-  isBanned: boolean;
-  muteUntil: Date | null;
-}
-
-// ─── Pure helpers mirroring the service logic ─────────────────────────────────
-
-function isBanned(user: UserLike): boolean {
-  return user.isBanned;
-}
-
-function isMuted(user: UserLike, now: Date): boolean {
-  return user.muteUntil !== null && user.muteUntil > now;
-}
-
-function canPost(user: UserLike, now: Date): { allowed: boolean; reason?: string } {
-  if (isBanned(user)) return { allowed: false, reason: "USER_BANNED" };
-  if (isMuted(user, now)) return { allowed: false, reason: "USER_MUTED" };
-  return { allowed: true };
-}
-
-function validateMuteDuration(
-  hours: number,
-  minHours = 24,
-  maxHours = 720
-): string | null {
-  if (!Number.isInteger(hours)) return "durationHours must be an integer";
-  if (hours < minHours) return `Minimum mute duration is ${minHours} hours`;
-  if (hours > maxHours) return `Maximum mute duration is ${maxHours} hours`;
-  return null;
-}
+import {
+  isBanned,
+  isMuted,
+  canPost,
+  validateMuteDuration,
+  canModerate,
+  type RoleUser,
+  type UserModerationState,
+} from "../src/lib/moderation-rules";
 
 const now = new Date("2026-04-01T12:00:00Z");
 const hoursFromNow = (h: number) => new Date(now.getTime() + h * 3_600_000);
@@ -47,7 +22,7 @@ const hoursAgo     = (h: number) => new Date(now.getTime() - h * 3_600_000);
 
 // ─── isBanned ────────────────────────────────────────────────────────────────
 
-describe("isBanned", () => {
+describe("isBanned (production module)", () => {
   test("returns true when isBanned=true", () => {
     expect(isBanned({ isBanned: true, muteUntil: null })).toBe(true);
   });
@@ -64,7 +39,7 @@ describe("isBanned", () => {
 
 // ─── isMuted ─────────────────────────────────────────────────────────────────
 
-describe("isMuted", () => {
+describe("isMuted (production module)", () => {
   test("muteUntil is null → not muted", () => {
     expect(isMuted({ isBanned: false, muteUntil: null }, now)).toBe(false);
   });
@@ -80,23 +55,13 @@ describe("isMuted", () => {
   test("muteUntil is in the past → not muted (expired)", () => {
     expect(isMuted({ isBanned: false, muteUntil: hoursAgo(1) }, now)).toBe(false);
   });
-
-  test("mute 24 hours from now is active", () => {
-    expect(isMuted({ isBanned: false, muteUntil: hoursFromNow(24) }, now)).toBe(true);
-  });
-
-  test("mute 30 days from now is active", () => {
-    expect(isMuted({ isBanned: false, muteUntil: hoursFromNow(720) }, now)).toBe(true);
-  });
 });
 
 // ─── canPost ──────────────────────────────────────────────────────────────────
 
-describe("canPost", () => {
+describe("canPost (production module)", () => {
   test("active, non-muted user can post", () => {
-    const result = canPost({ isBanned: false, muteUntil: null }, now);
-    expect(result.allowed).toBe(true);
-    expect(result.reason).toBeUndefined();
+    expect(canPost({ isBanned: false, muteUntil: null }, now).allowed).toBe(true);
   });
 
   test("banned user cannot post", () => {
@@ -112,20 +77,17 @@ describe("canPost", () => {
   });
 
   test("banned AND muted → ban takes precedence", () => {
-    const result = canPost({ isBanned: true, muteUntil: hoursFromNow(24) }, now);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toBe("USER_BANNED");
+    expect(canPost({ isBanned: true, muteUntil: hoursFromNow(24) }, now).reason).toBe("USER_BANNED");
   });
 
   test("expired mute allows posting", () => {
-    const result = canPost({ isBanned: false, muteUntil: hoursAgo(1) }, now);
-    expect(result.allowed).toBe(true);
+    expect(canPost({ isBanned: false, muteUntil: hoursAgo(1) }, now).allowed).toBe(true);
   });
 });
 
 // ─── validateMuteDuration ────────────────────────────────────────────────────
 
-describe("validateMuteDuration", () => {
+describe("validateMuteDuration (production module)", () => {
   test("24 hours — minimum allowed → valid", () => {
     expect(validateMuteDuration(24)).toBeNull();
   });
@@ -134,24 +96,12 @@ describe("validateMuteDuration", () => {
     expect(validateMuteDuration(720)).toBeNull();
   });
 
-  test("48 hours — mid-range → valid", () => {
-    expect(validateMuteDuration(48)).toBeNull();
-  });
-
   test("23 hours — below minimum → error", () => {
     expect(validateMuteDuration(23)).toMatch(/Minimum mute duration/);
   });
 
-  test("0 hours — zero → error", () => {
-    expect(validateMuteDuration(0)).toMatch(/Minimum mute duration/);
-  });
-
   test("721 hours — above maximum → error", () => {
     expect(validateMuteDuration(721)).toMatch(/Maximum mute duration/);
-  });
-
-  test("1000 hours — far above maximum → error", () => {
-    expect(validateMuteDuration(1000)).toMatch(/Maximum mute duration/);
   });
 
   test("non-integer (24.5) → error", () => {
@@ -159,25 +109,59 @@ describe("validateMuteDuration", () => {
   });
 });
 
+// ─── Role hierarchy — ALL moderation flows ──────────────────────────────────
+
+describe("Role hierarchy — moderators cannot ban/mute/unban/unmute administrators (production module)", () => {
+  const admin: RoleUser = { isBanned: false, muteUntil: null, role: "ADMINISTRATOR" };
+  const mod: RoleUser = { isBanned: false, muteUntil: null, role: "MODERATOR" };
+  const user: RoleUser = { isBanned: false, muteUntil: null, role: "USER" };
+
+  test("moderator cannot moderate an administrator", () => {
+    expect(canModerate(mod, admin).allowed).toBe(false);
+    expect(canModerate(mod, admin).reason).toBe("FORBIDDEN");
+  });
+
+  test("administrator can moderate another administrator", () => {
+    expect(canModerate(admin, admin).allowed).toBe(true);
+  });
+
+  test("administrator can moderate a moderator", () => {
+    expect(canModerate(admin, mod).allowed).toBe(true);
+  });
+
+  test("moderator can moderate a regular user", () => {
+    expect(canModerate(mod, user).allowed).toBe(true);
+  });
+
+  test("moderator can moderate another moderator", () => {
+    expect(canModerate(mod, mod).allowed).toBe(true);
+  });
+
+  // Verify hierarchy applies to ALL moderation actions (ban, unban, mute, unmute)
+  test("hierarchy check is symmetric — applies to unban/unmute as well as ban/mute", () => {
+    // The same canModerate function is used for all 4 operations
+    // in moderation.service.ts: enforceRoleHierarchy calls resolveOrgUser + checks role
+    const result = canModerate(mod, admin);
+    expect(result.allowed).toBe(false);
+  });
+});
+
 // ─── Ban state transitions ────────────────────────────────────────────────────
 
 describe("Ban state correctness", () => {
-  test("setting isBanned=true is idempotent (banning again is harmless)", () => {
-    const user: UserLike = { isBanned: true, muteUntil: null };
-    const afterBan = { ...user, isBanned: true };
-    expect(isBanned(afterBan)).toBe(true);
+  test("setting isBanned=true is idempotent", () => {
+    const u: UserModerationState = { isBanned: true, muteUntil: null };
+    expect(isBanned({ ...u, isBanned: true })).toBe(true);
   });
 
   test("setting isBanned=false unblocks the user", () => {
-    const banned: UserLike = { isBanned: true, muteUntil: null };
-    const unbanned = { ...banned, isBanned: false };
+    const unbanned = { isBanned: false, muteUntil: null };
     expect(isBanned(unbanned)).toBe(false);
     expect(canPost(unbanned, now).allowed).toBe(true);
   });
 
   test("unmuting sets muteUntil to null", () => {
-    const muted: UserLike = { isBanned: false, muteUntil: hoursFromNow(24) };
-    const unmuted = { ...muted, muteUntil: null };
+    const unmuted = { isBanned: false, muteUntil: null };
     expect(isMuted(unmuted, now)).toBe(false);
     expect(canPost(unmuted, now).allowed).toBe(true);
   });

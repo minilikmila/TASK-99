@@ -7,6 +7,7 @@ import {
   retryFailedNotifications,
 } from "../services/notification.service";
 import { runRiskRules } from "../services/risk.service";
+import { checkAlertThresholds } from "./log-alert";
 import { prisma } from "../lib/prisma";
 import { config } from "../config";
 
@@ -16,12 +17,52 @@ let started = false;
 
 async function purgeExpiredRecycleBinItems(): Promise<void> {
   const now = new Date();
-  const result = await prisma.recycleBinItem.deleteMany({
+
+  // Find expired items with their content references before deleting
+  const expired = await prisma.recycleBinItem.findMany({
+    where: { expiresAt: { lt: now } },
+    select: {
+      id: true,
+      organizationId: true,
+      itemType: true,
+      threadId: true,
+      replyId: true,
+    },
+  });
+
+  if (expired.length === 0) return;
+
+  // Collect IDs of underlying content to hard-delete
+  const threadIds = expired
+    .filter((i) => i.itemType === "THREAD" && i.threadId)
+    .map((i) => i.threadId!);
+  const replyIds = expired
+    .filter((i) => i.itemType === "REPLY" && i.replyId)
+    .map((i) => i.replyId!);
+
+  // Delete bin records first (they hold FK references to threads/replies)
+  const binResult = await prisma.recycleBinItem.deleteMany({
     where: { expiresAt: { lt: now } },
   });
-  if (result.count > 0) {
-    logger.info("Purged expired recycle bin items", { count: result.count });
+
+  // Hard-delete the orphaned soft-deleted replies (before threads, due to FK)
+  if (replyIds.length > 0) {
+    await prisma.reply.deleteMany({ where: { id: { in: replyIds } } });
   }
+
+  // Hard-delete the orphaned soft-deleted threads
+  // First remove child replies of those threads, then the threads themselves
+  if (threadIds.length > 0) {
+    await prisma.reply.deleteMany({ where: { threadId: { in: threadIds } } });
+    await prisma.threadTag.deleteMany({ where: { threadId: { in: threadIds } } });
+    await prisma.thread.deleteMany({ where: { id: { in: threadIds } } });
+  }
+
+  logger.info("Purged expired recycle bin items and underlying content", {
+    binItems: binResult.count,
+    threads: threadIds.length,
+    replies: replyIds.length,
+  });
 }
 
 async function runRiskRulesForAllOrgs(): Promise<void> {
@@ -42,13 +83,30 @@ async function runRiskRulesForAllOrgs(): Promise<void> {
   );
 }
 
-function runNightlyBackup(): void {
+async function runNightlyBackup(): Promise<void> {
+  // Read retention days from DB config (first active org) with env fallback
+  let retentionDays: number = config.backup.retentionDays;
+  try {
+    const orgs = await prisma.organization.findMany({
+      where: { isActive: true },
+      select: { id: true },
+      take: 1,
+    });
+    if (orgs.length > 0) {
+      const { getConfigValue, CONFIG_KEYS } = await import("../services/org-config.service");
+      retentionDays = await getConfigValue(orgs[0].id, CONFIG_KEYS.BACKUP_RETENTION_DAYS);
+    }
+  } catch {
+    // Fall back to config default
+  }
+
   const scriptPath = path.resolve(__dirname, "../../scripts/backup.sh");
-  execFile("bash", [scriptPath], (err, stdout, stderr) => {
+  const env = { ...process.env, BACKUP_RETENTION_DAYS: String(retentionDays) };
+  execFile("bash", [scriptPath], { env }, (err, stdout, stderr) => {
     if (err) {
       logger.error("Nightly backup failed", { error: err.message, stderr });
     } else {
-      logger.info("Nightly backup completed", { output: stdout.trim() });
+      logger.info("Nightly backup completed", { output: stdout.trim(), retentionDays });
     }
   });
 }
@@ -87,6 +145,17 @@ export function startScheduler(): void {
       await runRiskRulesForAllOrgs();
     } catch (err) {
       logger.error("runRiskRules job failed", {
+        error: (err as Error).message,
+      });
+    }
+  });
+
+  // Every minute: check alert thresholds and emit warnings when exceeded
+  cron.schedule("* * * * *", () => {
+    try {
+      checkAlertThresholds();
+    } catch (err) {
+      logger.error("checkAlertThresholds job failed", {
         error: (err as Error).message,
       });
     }
@@ -134,6 +203,7 @@ export function startScheduler(): void {
     jobs: [
       "dispatchNotifications (every 1 min)",
       "retryNotifications (every 5 min)",
+      "alertThresholds (every 1 min)",
       "riskRules (every 15 min)",
       "recycleBinPurge (daily 02:00 UTC)",
       "revokedTokenPurge (every 1 hour)",

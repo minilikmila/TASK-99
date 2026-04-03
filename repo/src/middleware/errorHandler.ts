@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
 import { logger } from "../lib/logger";
 import { ApiErrorResponse, ErrorCode } from "../types";
+import { recordAlertEvent } from "../jobs/log-alert";
 
 export class AppError extends Error {
   constructor(
@@ -33,6 +34,17 @@ export function errorHandler(
   _next: NextFunction
 ): void {
   if (err instanceof AppError) {
+    // Track alert-worthy error categories
+    if (err.statusCode === 401 || err.code === ErrorCode.UNAUTHORIZED) {
+      recordAlertEvent("auth_failure");
+    }
+    if (err.statusCode === 429) {
+      recordAlertEvent("rate_limited");
+    }
+    if (err.statusCode >= 500) {
+      recordAlertEvent("error");
+    }
+
     const body: ApiErrorResponse = {
       error: {
         code: err.code,
@@ -58,6 +70,7 @@ export function errorHandler(
     return;
   }
 
+  recordAlertEvent("error");
   logger.error("Unhandled error", {
     correlationId: req.correlationId,
     error: err.message,

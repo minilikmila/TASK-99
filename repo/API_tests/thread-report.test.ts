@@ -5,8 +5,10 @@
  * and integration with the risk engine (>=5 reports triggers flag).
  */
 
-import { api, loginAs } from "./helpers/client";
-import { TEST_ORG, CREDS, SECTION_IDS, USER_IDS } from "./helpers/fixtures";
+import { api, loginAs, BASE_URL } from "./helpers/client";
+import { TEST_ORG, CREDS, SECTION_IDS } from "./helpers/fixtures";
+
+const INTERNAL_KEY = process.env.INTERNAL_API_KEY ?? "test-internal-key-secret";
 
 let adminToken: string;
 let user1Token: string;
@@ -110,19 +112,7 @@ describe("Risk engine — high report volume triggers flag", () => {
       expect([201]).toContain(r.status);
     }
 
-    // Trigger risk rules manually via internal endpoint
-    const { BASE_URL } = await import("./helpers/client");
-    const INTERNAL_KEY = process.env.INTERNAL_API_KEY ?? "test-internal-key-secret";
-
-    // The risk rules are triggered by the scheduler. We can call the risk scan
-    // by using the internal dispatch. But risk rules aren't exposed via internal endpoint.
-    // Instead, let's check risk flags directly — the reports are in the audit log,
-    // and the risk engine scans audit logs.
-    // We need to trigger runRiskRules. Let's check if there's an internal endpoint...
-    // There isn't one — risk runs on a schedule. Let's just verify the reports exist
-    // and that the risk flags endpoint shows the flag after we manually trigger it.
-
-    // Since we can't trigger risk rules via API, verify the audit events exist
+    // Verify all 5 reports are recorded in audit log
     const auditRes = await api.get("/audit/logs", adminToken, {
       eventType: "thread.reported",
     });
@@ -130,5 +120,30 @@ describe("Risk engine — high report volume triggers flag", () => {
     const reports = (auditRes.body as Record<string, unknown>).data as Array<Record<string, unknown>>;
     const threadReports = reports.filter((r) => r.resourceId === riskThreadId);
     expect(threadReports.length).toBe(5);
+
+    // Trigger risk rules via internal endpoint (Jest has no DATABASE_URL; the app container does)
+    const meRes = await api.get("/auth/me", adminToken);
+    const orgId = (meRes.body as Record<string, unknown>).organizationId as string;
+
+    const riskRun = await fetch(`${BASE_URL}/api/v1/internal/risk/run-rules`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-key": INTERNAL_KEY,
+      },
+      body: JSON.stringify({ organizationId: orgId }),
+    });
+    expect(riskRun.status).toBe(200);
+
+    // Assert the HIGH_REPORT_VOLUME risk flag was created for this thread
+    const flagsRes = await api.get("/risk/flags", adminToken);
+    expect(flagsRes.status).toBe(200);
+    const flags = (flagsRes.body as Record<string, unknown>).data as Array<Record<string, unknown>>;
+    const riskFlag = flags.find(
+      (f) => f.subjectId === riskThreadId && f.rule === "HIGH_REPORT_VOLUME"
+    );
+    expect(riskFlag).toBeDefined();
+    expect(riskFlag!.status).toBe("OPEN");
+    expect(riskFlag!.subjectType).toBe("Thread");
   });
 });

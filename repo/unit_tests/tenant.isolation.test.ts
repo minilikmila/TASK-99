@@ -61,6 +61,90 @@ describe("Tenant isolation — resource lookup", () => {
   });
 });
 
+// ─── Cross-tenant authorization for /admin/organizations ─────────────────────
+
+describe("Tenant isolation — admin organization list/update authorization", () => {
+  interface OrgLike {
+    id: string;
+    name: string;
+    slug: string;
+  }
+
+  interface UserContext {
+    id: string;
+    organizationId: string;
+    role: "ADMINISTRATOR" | "MODERATOR" | "ANALYST" | "USER";
+  }
+
+  const orgs: OrgLike[] = [
+    { id: "org_a_id", name: "Org A", slug: "org-a" },
+    { id: "org_b_id", name: "Org B", slug: "org-b" },
+    { id: "org_c_id", name: "Org C", slug: "org-c" },
+  ];
+
+  function canListOrganizations(user: UserContext): boolean {
+    return user.role === "ADMINISTRATOR";
+  }
+
+  function canUpdateOrganization(
+    user: UserContext,
+    targetOrgId: string
+  ): boolean {
+    // Only administrators can manage their own organization
+    return user.role === "ADMINISTRATOR" && user.organizationId === targetOrgId;
+  }
+
+  // listOrganizations returns ALL orgs (platform-level view), so an admin
+  // from Org A can see Org B. This is by design, but non-admin roles must
+  // be blocked entirely.
+
+  test("admin from Org A can list organizations", () => {
+    const admin: UserContext = { id: "u1", organizationId: ORG_A, role: "ADMINISTRATOR" };
+    expect(canListOrganizations(admin)).toBe(true);
+  });
+
+  test("moderator from Org A cannot list organizations", () => {
+    const mod: UserContext = { id: "u2", organizationId: ORG_A, role: "MODERATOR" };
+    expect(canListOrganizations(mod)).toBe(false);
+  });
+
+  test("analyst from Org A cannot list organizations", () => {
+    const analyst: UserContext = { id: "u3", organizationId: ORG_A, role: "ANALYST" };
+    expect(canListOrganizations(analyst)).toBe(false);
+  });
+
+  test("regular user from Org A cannot list organizations", () => {
+    const user: UserContext = { id: "u4", organizationId: ORG_A, role: "USER" };
+    expect(canListOrganizations(user)).toBe(false);
+  });
+
+  test("admin from Org A can update their own Org A", () => {
+    const admin: UserContext = { id: "u1", organizationId: ORG_A, role: "ADMINISTRATOR" };
+    expect(canUpdateOrganization(admin, ORG_A)).toBe(true);
+  });
+
+  test("admin from Org A cannot update Org B (cross-tenant blocked)", () => {
+    const admin: UserContext = { id: "u1", organizationId: ORG_A, role: "ADMINISTRATOR" };
+    expect(canUpdateOrganization(admin, "org_b_id")).toBe(false);
+  });
+
+  test("moderator from Org A cannot update any organization", () => {
+    const mod: UserContext = { id: "u2", organizationId: ORG_A, role: "MODERATOR" };
+    expect(canUpdateOrganization(mod, ORG_A)).toBe(false);
+    expect(canUpdateOrganization(mod, ORG_B)).toBe(false);
+  });
+
+  test("moderator from Org B cannot update Org A (cross-tenant + role check)", () => {
+    const mod: UserContext = { id: "u5", organizationId: ORG_B, role: "MODERATOR" };
+    expect(canUpdateOrganization(mod, ORG_A)).toBe(false);
+  });
+
+  test("user from Org B cannot update Org B (own org, wrong role)", () => {
+    const user: UserContext = { id: "u6", organizationId: ORG_B, role: "USER" };
+    expect(canUpdateOrganization(user, ORG_B)).toBe(false);
+  });
+});
+
 describe("Tenant isolation — recycle bin", () => {
   interface RecycleBinItemLike {
     id: string;

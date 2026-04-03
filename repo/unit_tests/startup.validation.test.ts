@@ -97,6 +97,36 @@ describe("validateStartupConfig", () => {
         })
       ).not.toThrow();
     });
+
+    test("throws when JWT_SECRET is the docker-compose default (local-dev- prefix)", () => {
+      expect(() =>
+        validateStartupConfig({
+          NODE_ENV: "production",
+          JWT_SECRET: "local-dev-jwt-secret-change-in-production-32chars-VALID-KEY-0123456789",
+          INTERNAL_API_KEY: STRONG_KEY,
+        })
+      ).toThrow(/JWT_SECRET/);
+    });
+
+    test("throws when INTERNAL_API_KEY is the docker-compose default (local-dev- prefix)", () => {
+      expect(() =>
+        validateStartupConfig({
+          NODE_ENV: "production",
+          JWT_SECRET: STRONG_SECRET,
+          INTERNAL_API_KEY: "local-dev-internal-api-key-VALID-KEY-0123456789abcdef",
+        })
+      ).toThrow(/INTERNAL_API_KEY/);
+    });
+
+    test("throws when JWT_SECRET starts with dev-secret-", () => {
+      expect(() =>
+        validateStartupConfig({
+          NODE_ENV: "production",
+          JWT_SECRET: "dev-secret-change-me-this-is-long-enough-32",
+          INTERNAL_API_KEY: STRONG_KEY,
+        })
+      ).toThrow(/JWT_SECRET/);
+    });
   });
 
   describe("non-production environments", () => {

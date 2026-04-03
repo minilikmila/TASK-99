@@ -25,8 +25,12 @@ import type {
 
 // ─── Organizations ────────────────────────────────────────────────────────────
 
-export async function listOrganizations(): Promise<Organization[]> {
-  return organizationRepository.findAll();
+export async function listOrganizations(
+  actorOrgId: string
+): Promise<Organization[]> {
+  // Scoped to the actor's own organization — prevents cross-tenant data leakage
+  const org = await organizationRepository.findById(actorOrgId);
+  return org ? [org] : [];
 }
 
 export async function createOrganization(
@@ -63,6 +67,15 @@ export async function updateOrganization(
   actorOrgId: string,
   input: UpdateOrganizationInput
 ): Promise<Organization> {
+  // Enforce tenant scope — admins may only update their own organization
+  if (orgId !== actorOrgId) {
+    throw new AppError(
+      403,
+      ErrorCode.FORBIDDEN,
+      "Cannot update a different organization"
+    );
+  }
+
   const existing = await organizationRepository.findById(orgId);
   if (!existing) {
     throw new AppError(404, ErrorCode.NOT_FOUND, "Organization not found");
@@ -369,6 +382,15 @@ export async function updateBooking(
 
   const startAt = input.startAt ? new Date(input.startAt) : booking.startAt;
   const endAt = input.endAt ? new Date(input.endAt) : booking.endAt;
+
+  // Validate merged times — startAt must be before endAt
+  if (startAt >= endAt) {
+    throw new AppError(
+      400,
+      ErrorCode.VALIDATION_ERROR,
+      "Booking start time must be before end time"
+    );
+  }
 
   const conflict = await adminRepository.findOverlappingBooking(
     booking.venueId,

@@ -10,6 +10,8 @@ import { analyticsService, EVENT } from "./analytics.service";
 import { getConfigValue, CONFIG_KEYS } from "./org-config.service";
 import type { LoginInput } from "../schemas/auth.schema";
 
+import { isLockedOut } from "../lib/auth-lockout";
+
 export async function login(
   input: LoginInput & { ipAddress?: string }
 ): Promise<{ user: AuthenticatedUser; token: string }> {
@@ -37,7 +39,7 @@ export async function login(
     organizationSlug,
     windowStart
   );
-  if (recentFailures >= lockoutAttempts) {
+  if (isLockedOut(recentFailures, lockoutAttempts)) {
     throw new AppError(
       429,
       ErrorCode.ACCOUNT_LOCKED,
@@ -102,17 +104,46 @@ export async function hashPassword(plain: string): Promise<string> {
 }
 
 /**
- * Called by admin user-creation flow to record the registration funnel event.
+ * Provision a new user within an organization.
+ * Only callable by administrators. Records the registration funnel event.
  */
-export async function recordUserRegistered(
+export async function provisionUser(
   organizationId: string,
-  userId: string
-): Promise<void> {
+  actorId: string,
+  input: { username: string; password: string; role: string }
+): Promise<{ id: string; username: string; role: string }> {
+  // Check for duplicate username within org
+  const existing = await userRepository.findByOrgAndUsername(organizationId, input.username);
+  if (existing) {
+    throw new AppError(409, ErrorCode.CONFLICT, `Username "${input.username}" is already taken`);
+  }
+
+  const passwordHash = await hashPassword(input.password);
+  const user = await userRepository.create({
+    organizationId,
+    username: input.username,
+    passwordHash,
+    role: input.role as "ADMINISTRATOR" | "MODERATOR" | "ANALYST" | "USER",
+  });
+
+  // Audit
+  await auditRepository.create({
+    organizationId,
+    actorId,
+    eventType: "user.provisioned",
+    resourceType: "User",
+    resourceId: user.id,
+    details: { username: user.username, role: user.role },
+  });
+
+  // Record the registration funnel event
   void analyticsService.recordEvent({
     organizationId,
-    userId,
+    userId: user.id,
     eventType: EVENT.USER_REGISTERED,
     resourceType: "User",
-    resourceId: userId,
+    resourceId: user.id,
   });
+
+  return { id: user.id, username: user.username, role: user.role };
 }

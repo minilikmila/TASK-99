@@ -1,5 +1,7 @@
 import { User, Role, Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { maskIp } from "../lib/logger";
+import { encryptField } from "../lib/encryption";
 
 export interface CreateUserInput {
   organizationId: string;
@@ -32,10 +34,6 @@ export const userRepository = {
     return prisma.user.findUnique({
       where: { organizationId_username: { organizationId, username } },
     });
-  },
-
-  findById(id: string): Promise<User | null> {
-    return prisma.user.findUnique({ where: { id } });
   },
 
   findByIdInOrg(id: string, organizationId: string): Promise<User | null> {
@@ -77,6 +75,11 @@ export const userRepository = {
   },
 
   createLoginAttempt(data: LoginAttemptInput): Promise<void> {
-    return prisma.loginAttempt.create({ data }).then(() => undefined);
+    return prisma.loginAttempt.create({
+      data: {
+        ...data,
+        ipAddress: data.ipAddress ? encryptField(maskIp(data.ipAddress)) : undefined,
+      },
+    }).then(() => undefined);
   },
 };

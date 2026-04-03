@@ -203,23 +203,17 @@ cd repo && docker compose -f docker-compose.test.yml down --volumes
 
 ```
 .
-├── docs/
-│   ├── api-spec.md
-│   ├── design.md
-│   ├── prompt.md
-│   └── questions.md
-└── repo/
-    ├── src/                      # Express app code
-    ├── prisma/                   # Prisma schema + migrations
-    ├── config/                   # Runtime defaults
+├── src/                      # Express app code
+├── prisma/                   # Prisma schema + migrations
+├── config/                   # Runtime defaults
     ├── scripts/                  # Docker entrypoints + seed + backup
-    ├── unit_tests/              # Jest unit tests (no DB)
-    ├── API_tests/               # Jest API integration tests (requires server)
-    ├── run_tests.sh             # One-click test runner
-    ├── Dockerfile
-    ├── docker-compose.yml
-    ├── package.json
-    └── tsconfig.json
+├── unit_tests/              # Jest unit tests (no DB)
+├── API_tests/               # Jest API integration tests (requires server)
+├── run_tests.sh             # One-click test runner
+├── Dockerfile
+├── docker-compose.yml
+├── package.json
+└── tsconfig.json
 ```
 
 ---
@@ -245,7 +239,7 @@ Base path: `/api/v1`
 All endpoints under `/api/v1` (except `/health` and `/auth/login`) require a `Bearer` token.  
 Every response includes an `X-Correlation-Id` header for request tracing.
 
-See [`docs/api-spec.md`](docs/api-spec.md) for the full specification.
+Endpoint details are documented inline via Zod schemas in `src/schemas/`.
 
 ---
 

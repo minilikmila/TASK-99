@@ -14,8 +14,6 @@ repo/dist/
 prisma/migrations/**/migration_lock.toml
 
 ### Env / secrets
-.env
-.env.*
 *.pem
 *.key
 
@@ -29,7 +27,9 @@ Thumbs.db
 .vscode/
 .idea/
 
-### Temporary analysis output
-repo/.tmp/
+### Temporary analysis output (workspace root only)
 tmp/
 
+config.bat
+temp_auto_push.bat
+temp_interactive_push.bat

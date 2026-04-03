@@ -11,6 +11,9 @@ import {
 import * as moderationService from "../services/moderation.service";
 import { auditRepository } from "../repositories/audit.repository";
 import { buildPaginatedResponse } from "../lib/response";
+import { getConfigValue, CONFIG_KEYS } from "../services/org-config.service";
+import { AppError } from "../middleware/errorHandler";
+import { ErrorCode } from "../types";
 
 // ─── Ban / Unban ──────────────────────────────────────────────────────────────
 
@@ -59,9 +62,21 @@ export async function handleMute(
 ): Promise<void> {
   try {
     const input = muteSchema.parse(req.body);
+
+    // Enforce org-specific mute duration limits from DB
+    const orgId = req.user!.organizationId;
+    const minHours = await getConfigValue(orgId, CONFIG_KEYS.MUTE_DURATION_MIN_HOURS);
+    const maxHours = await getConfigValue(orgId, CONFIG_KEYS.MUTE_DURATION_MAX_HOURS);
+    if (input.durationHours < minHours) {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, `Minimum mute duration is ${minHours} hours`);
+    }
+    if (input.durationHours > maxHours) {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, `Maximum mute duration is ${maxHours} hours`);
+    }
+
     const user = await moderationService.muteUser(
       req.params.userId,
-      req.user!.organizationId,
+      orgId,
       req.user!.id,
       input,
       req.socket.remoteAddress
@@ -99,8 +114,16 @@ export async function handleBulkContent(
 ): Promise<void> {
   try {
     const input = bulkContentSchema.parse(req.body);
+
+    // Enforce org-specific bulk action limit from DB
+    const orgId = req.user!.organizationId;
+    const maxItems = await getConfigValue(orgId, CONFIG_KEYS.BULK_ACTION_MAX_ITEMS);
+    if (input.threadIds.length > maxItems) {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, `Maximum ${maxItems} items per request`);
+    }
+
     const results = await moderationService.bulkContentAction(
-      req.user!.organizationId,
+      orgId,
       req.user!.id,
       input
     );

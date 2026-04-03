@@ -106,12 +106,13 @@ export const notificationRepository = {
 
   async upsertSubscription(
     userId: string,
+    organizationId: string,
     category: string,
     isOptIn: boolean
   ): Promise<void> {
     await prisma.notificationSubscription.upsert({
       where: { userId_category: { userId, category } },
-      create: { userId, category, isOptIn },
+      create: { userId, organizationId, category, isOptIn },
       update: { isOptIn },
     });
   },

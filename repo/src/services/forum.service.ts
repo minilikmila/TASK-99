@@ -3,11 +3,14 @@ import { threadRepository, ThreadWithIncludes } from "../repositories/thread.rep
 import { replyRepository, ReplyWithAuthor } from "../repositories/reply.repository";
 import { recycleRepository } from "../repositories/recycle.repository";
 import { auditRepository } from "../repositories/audit.repository";
+import { sectionRepository } from "../repositories/section.repository";
+import { tagRepository } from "../repositories/tag.repository";
 import { notifyNewReply } from "./notification.service";
 import { analyticsService, EVENT } from "./analytics.service";
-import { config } from "../config";
+import { getConfigValue, CONFIG_KEYS } from "./org-config.service";
 import { AppError } from "../middleware/errorHandler";
 import { ErrorCode } from "../types";
+import { prisma } from "../lib/prisma";
 import type {
   CreateThreadInput,
   UpdateThreadInput,
@@ -42,6 +45,47 @@ export async function createThread(
   authorId: string,
   input: CreateThreadInput
 ): Promise<ThreadWithIncludes> {
+  // ── Tenant isolation: verify all referenced IDs belong to this org ──
+
+  // 1. Section must belong to this organization
+  const section = await sectionRepository.findById(input.sectionId, organizationId);
+  if (!section) {
+    throw new AppError(
+      400,
+      ErrorCode.TENANT_VIOLATION,
+      "Section not found in your organization"
+    );
+  }
+
+  // 2. Subsection must belong to the specified section (and thus the org)
+  if (input.subsectionId) {
+    const subsection = await sectionRepository.findSubsectionById(
+      input.subsectionId,
+      input.sectionId
+    );
+    if (!subsection) {
+      throw new AppError(
+        400,
+        ErrorCode.TENANT_VIOLATION,
+        "Subsection not found in the specified section"
+      );
+    }
+  }
+
+  // 3. All tag IDs must belong to this organization
+  if (input.tagIds && input.tagIds.length > 0) {
+    for (const tagId of input.tagIds) {
+      const tag = await tagRepository.findById(tagId, organizationId);
+      if (!tag) {
+        throw new AppError(
+          400,
+          ErrorCode.TENANT_VIOLATION,
+          `Tag '${tagId}' not found in your organization`
+        );
+      }
+    }
+  }
+
   const thread = await threadRepository.create({
     ...input,
     organizationId,
@@ -180,15 +224,16 @@ export async function pinThread(
     throw new AppError(409, ErrorCode.CONFLICT, "Thread is already pinned");
   }
 
+  const maxPinned = await getConfigValue(organizationId, CONFIG_KEYS.MAX_PINNED_PER_SECTION);
   const pinnedCount = await threadRepository.countPinned(
     organizationId,
     thread.sectionId
   );
-  if (pinnedCount >= config.forum.maxPinnedPerSection) {
+  if (pinnedCount >= maxPinned) {
     throw new AppError(
       409,
       ErrorCode.PIN_LIMIT_REACHED,
-      `Section already has the maximum of ${config.forum.maxPinnedPerSection} pinned threads`
+      `Section already has the maximum of ${maxPinned} pinned threads`
     );
   }
 
@@ -229,6 +274,54 @@ export async function unpinThread(
   return updated;
 }
 
+export async function featureThread(
+  threadId: string,
+  organizationId: string,
+  actorId: string
+): Promise<Thread> {
+  const thread = await getThread(threadId, organizationId);
+
+  if (thread.isFeatured) {
+    throw new AppError(409, ErrorCode.CONFLICT, "Thread is already featured");
+  }
+
+  const updated = await threadRepository.update(threadId, { isFeatured: true });
+
+  await auditRepository.create({
+    organizationId,
+    actorId,
+    eventType: "thread.featured",
+    resourceType: "Thread",
+    resourceId: threadId,
+  });
+
+  return updated;
+}
+
+export async function unfeatureThread(
+  threadId: string,
+  organizationId: string,
+  actorId: string
+): Promise<Thread> {
+  const thread = await getThread(threadId, organizationId);
+
+  if (!thread.isFeatured) {
+    throw new AppError(409, ErrorCode.CONFLICT, "Thread is not featured");
+  }
+
+  const updated = await threadRepository.update(threadId, { isFeatured: false });
+
+  await auditRepository.create({
+    organizationId,
+    actorId,
+    eventType: "thread.unfeatured",
+    resourceType: "Thread",
+    resourceId: threadId,
+  });
+
+  return updated;
+}
+
 export async function deleteThread(
   threadId: string,
   organizationId: string,
@@ -246,13 +339,15 @@ export async function deleteThread(
     throw new AppError(403, ErrorCode.FORBIDDEN, "You can only delete your own threads");
   }
 
+  const retentionDays = await getConfigValue(organizationId, CONFIG_KEYS.RECYCLE_BIN_RETENTION_DAYS);
   const now = new Date();
   const expiresAt = new Date(
-    now.getTime() + config.forum.recycleBinRetentionDays * 86_400_000
+    now.getTime() + retentionDays * 86_400_000
   );
 
   await threadRepository.softDelete(threadId, now);
   await recycleRepository.create({
+    organizationId,
     itemType: "THREAD",
     threadId: thread.id,
     deletedById: actorId,
@@ -266,6 +361,50 @@ export async function deleteThread(
     eventType: "thread.deleted",
     resourceType: "Thread",
     resourceId: threadId,
+  });
+}
+
+// ─── Thread Reporting ────────────────────────────────────────────────────────
+
+const REPORT_DEDUP_WINDOW_MS = 3_600_000; // 1 hour
+
+export async function reportThread(
+  threadId: string,
+  organizationId: string,
+  reporterId: string,
+  reason?: string
+): Promise<void> {
+  // Verify thread exists
+  await getThread(threadId, organizationId);
+
+  // Duplicate check: same user, same thread, within dedup window
+  const windowStart = new Date(Date.now() - REPORT_DEDUP_WINDOW_MS);
+  const existing = await prisma.auditLog.findFirst({
+    where: {
+      organizationId,
+      actorId: reporterId,
+      eventType: "thread.reported",
+      resourceType: "Thread",
+      resourceId: threadId,
+      createdAt: { gte: windowStart },
+    },
+  });
+  if (existing) {
+    throw new AppError(
+      409,
+      ErrorCode.DUPLICATE_REPORT,
+      "You have already reported this thread recently"
+    );
+  }
+
+  // Record the report as an audit event — this is what the risk engine scans
+  await auditRepository.create({
+    organizationId,
+    actorId: reporterId,
+    eventType: "thread.reported",
+    resourceType: "Thread",
+    resourceId: threadId,
+    details: reason ? { reason } : undefined,
   });
 }
 
@@ -303,11 +442,12 @@ export async function createReply(
       throw new AppError(404, ErrorCode.NOT_FOUND, "Parent reply not found");
     }
     depth = parent.depth + 1;
-    if (depth > config.forum.maxReplyDepth) {
+    const maxDepth = await getConfigValue(organizationId, CONFIG_KEYS.MAX_REPLY_DEPTH);
+    if (depth > maxDepth) {
       throw new AppError(
         422,
         ErrorCode.REPLY_DEPTH_EXCEEDED,
-        `Reply nesting exceeds the maximum depth of ${config.forum.maxReplyDepth}`
+        `Reply nesting exceeds the maximum depth of ${maxDepth}`
       );
     }
   }
@@ -426,13 +566,15 @@ export async function deleteReply(
     throw new AppError(403, ErrorCode.FORBIDDEN, "You can only delete your own replies");
   }
 
+  const retentionDays = await getConfigValue(organizationId, CONFIG_KEYS.RECYCLE_BIN_RETENTION_DAYS);
   const now = new Date();
   const expiresAt = new Date(
-    now.getTime() + config.forum.recycleBinRetentionDays * 86_400_000
+    now.getTime() + retentionDays * 86_400_000
   );
 
   await replyRepository.softDelete(replyId, now);
   await recycleRepository.create({
+    organizationId,
     itemType: "REPLY",
     replyId: reply.id,
     deletedById: actorId,

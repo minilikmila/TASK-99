@@ -58,7 +58,10 @@ model Organization {
   announcements          Announcement[]
   carouselItems          CarouselItem[]
   venues                 Venue[]
+  venueBookings          VenueBooking[]
+  recycleBinItems        RecycleBinItem[]
   notifications          Notification[]
+  notificationSubs       NotificationSubscription[]
   auditLogs              AuditLog[]
   eventLogs              EventLog[]
   riskFlags              RiskFlag[]
@@ -216,17 +219,20 @@ model ThreadTag {
 // ─── Recycle Bin ──────────────────────────────────────────────────────────────
 
 model RecycleBinItem {
-  id          String             @id @default(cuid())
-  itemType    RecycleBinItemType
-  threadId    String?            @unique
-  replyId     String?            @unique
-  deletedById String
-  deletedAt   DateTime           @default(now())
-  expiresAt   DateTime
+  id             String             @id @default(cuid())
+  organizationId String
+  itemType       RecycleBinItemType
+  threadId       String?            @unique
+  replyId        String?            @unique
+  deletedById    String
+  deletedAt      DateTime           @default(now())
+  expiresAt      DateTime
 
-  thread Thread? @relation(fields: [threadId], references: [id])
-  reply  Reply?  @relation(fields: [replyId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  thread       Thread?      @relation(fields: [threadId], references: [id])
+  reply        Reply?       @relation(fields: [replyId], references: [id])
 
+  @@index([organizationId])
   @@index([expiresAt])
 }
 
@@ -283,17 +289,20 @@ model Venue {
 }
 
 model VenueBooking {
-  id         String   @id @default(cuid())
-  venueId    String
-  bookedById String
-  title      String
-  startAt    DateTime
-  endAt      DateTime
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id             String   @id @default(cuid())
+  organizationId String
+  venueId        String
+  bookedById     String
+  title          String
+  startAt        DateTime
+  endAt          DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  venue Venue @relation(fields: [venueId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  venue        Venue        @relation(fields: [venueId], references: [id])
 
+  @@index([organizationId])
   @@index([venueId, startAt, endAt])
 }
 
@@ -324,14 +333,17 @@ model Notification {
 }
 
 model NotificationSubscription {
-  id       String  @id @default(cuid())
-  userId   String
-  category String
-  isOptIn  Boolean @default(true)
+  id             String  @id @default(cuid())
+  organizationId String
+  userId         String
+  category       String
+  isOptIn        Boolean @default(true)
 
-  user User @relation(fields: [userId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
 
   @@unique([userId, category])
+  @@index([organizationId])
 }
 
 // ─── Audit & Analytics ────────────────────────────────────────────────────────

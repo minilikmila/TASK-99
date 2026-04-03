@@ -7,6 +7,7 @@ import { organizationRepository } from "../repositories/organization.repository"
 import { userRepository } from "../repositories/user.repository";
 import { auditRepository } from "../repositories/audit.repository";
 import { analyticsService, EVENT } from "./analytics.service";
+import { getConfigValue, CONFIG_KEYS } from "./org-config.service";
 import type { LoginInput } from "../schemas/auth.schema";
 
 export async function login(
@@ -27,20 +28,20 @@ export async function login(
     throw new AppError(401, ErrorCode.UNAUTHORIZED, "Invalid credentials");
   }
 
-  // 2. Check lockout window before touching user record
-  const windowStart = new Date(
-    Date.now() - config.auth.lockoutWindowMinutes * 60_000
-  );
+  // 2. Check lockout window — thresholds from DB config (org-scoped)
+  const lockoutAttempts = await getConfigValue(org.id, CONFIG_KEYS.AUTH_LOCKOUT_ATTEMPTS);
+  const lockoutWindowMin = await getConfigValue(org.id, CONFIG_KEYS.AUTH_LOCKOUT_WINDOW_MINUTES);
+  const windowStart = new Date(Date.now() - lockoutWindowMin * 60_000);
   const recentFailures = await userRepository.countRecentFailedAttempts(
     username,
     organizationSlug,
     windowStart
   );
-  if (recentFailures >= config.auth.lockoutAttempts) {
+  if (recentFailures >= lockoutAttempts) {
     throw new AppError(
       429,
       ErrorCode.ACCOUNT_LOCKED,
-      `Account locked — too many failed attempts. Try again after ${config.auth.lockoutWindowMinutes} minutes.`
+      `Account locked — too many failed attempts. Try again after ${lockoutWindowMin} minutes.`
     );
   }
 

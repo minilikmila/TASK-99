@@ -2,7 +2,16 @@
   "permissions": {
     "allow": [
       "Bash(bash run_tests.sh)",
-      "Bash(docker compose:*)"
+      "Bash(docker compose:*)",
+      "Bash(TEST_BASE_URL=http://localhost:3011 npx jest --testPathPattern=\"realtime-auth\" --verbose --forceExit --runInBand)",
+      "Bash(curl -sf http://localhost:3011/api/v1/health)",
+      "Bash(break)",
+      "Bash(TEST_BASE_URL=http://localhost:3011 npx jest --testPathPattern=\"API_tests/db-config\" --verbose --forceExit --runInBand)",
+      "Bash(TEST_BASE_URL=http://localhost:3011 npx jest --testPathPattern=API_tests --verbose --forceExit --runInBand)",
+      "Bash(npx jest:*)",
+      "Bash(TEST_BASE_URL=http://localhost:3011 npx jest --testPathPattern=\"API_tests/thread-report\" --verbose --forceExit --runInBand)",
+      "Bash(TEST_BASE_URL=http://localhost:3011 npx jest --testPathPattern=API_tests --forceExit --runInBand)",
+      "Bash(TEST_BASE_URL=http://localhost:3011 npx jest --testPathPattern=\"API_tests/threads\" --verbose --forceExit --runInBand)"
     ]
   }
 }

@@ -5,6 +5,7 @@ import {
   threadStateSchema,
   listThreadsSchema,
 } from "../schemas/thread.schema";
+import { reportThreadSchema } from "../schemas/moderation.schema";
 import * as forumService from "../services/forum.service";
 import { buildPaginatedResponse } from "../lib/response";
 import { AppError } from "../middleware/errorHandler";
@@ -159,6 +160,59 @@ export async function handleDelete(
       req.user!.role
     );
     res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function handleFeature(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const thread = await forumService.featureThread(
+      req.params.threadId,
+      req.user!.organizationId,
+      req.user!.id
+    );
+    res.json(thread);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function handleUnfeature(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const thread = await forumService.unfeatureThread(
+      req.params.threadId,
+      req.user!.organizationId,
+      req.user!.id
+    );
+    res.json(thread);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function handleReport(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const input = reportThreadSchema.parse(req.body ?? {});
+    await forumService.reportThread(
+      req.params.threadId,
+      req.user!.organizationId,
+      req.user!.id,
+      input.reason
+    );
+    res.status(201).json({ message: "Thread reported" });
   } catch (err) {
     next(err);
   }

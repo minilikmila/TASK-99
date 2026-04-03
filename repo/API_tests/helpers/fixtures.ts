@@ -27,3 +27,9 @@ export const SECTION_IDS = {
   alpha: "ts-section-alpha",
   beta:  "ts-section-beta",
 } as const;
+
+// Second organization (for cross-tenant isolation tests)
+export const OTHER_ORG = "other-org";
+export const OTHER_ORG_CREDS = { username: "other-user", password: "other-password-secure" };
+export const OTHER_SECTION_ID = "other-section-id";
+export const OTHER_TAG_ID = "other-tag-id";

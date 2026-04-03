@@ -341,6 +341,9 @@ describe("PATCH /moderation/users/:id/role", () => {
       { role: "USER" },
       adminToken
     );
+
+    // Re-login to get fresh token (role changes invalidate old tokens)
+    userToken = await loginAs(TEST_ORG, CREDS.user1.username, CREDS.user1.password);
   });
 
   test("validation — invalid role returns 400", async () => {

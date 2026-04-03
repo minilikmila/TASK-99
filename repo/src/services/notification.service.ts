@@ -13,6 +13,8 @@
 import { config } from "../config";
 import { logger } from "../lib/logger";
 import { notificationRepository } from "../repositories/notification.repository";
+import { getConfigValue, getRetryDelays, CONFIG_KEYS } from "./org-config.service";
+import { prisma } from "../lib/prisma";
 
 // ─── Notification categories ──────────────────────────────────────────────────
 
@@ -157,6 +159,7 @@ export async function notifyAnnouncementPublished(
 
 /**
  * Mark all due PENDING notifications as DELIVERED.
+ * On failure, marks notification as FAILED with retry backoff from DB config.
  * Called by the scheduler every minute.
  */
 export async function dispatchDueNotifications(): Promise<number> {
@@ -173,6 +176,18 @@ export async function dispatchDueNotifications(): Promise<number> {
         notificationId: n.id,
         error: (err as Error).message,
       });
+      // Mark as FAILED so the retry worker picks it up with exponential backoff
+      try {
+        const delays = await getRetryDelays(n.organizationId);
+        const delayMinutes = delays[0] ?? 1;
+        const nextRetryAt = new Date(now.getTime() + delayMinutes * 60_000);
+        await notificationRepository.markFailed(n.id, n.retryCount + 1, nextRetryAt);
+      } catch (markErr) {
+        logger.error("Failed to mark notification as FAILED", {
+          notificationId: n.id,
+          error: (markErr as Error).message,
+        });
+      }
     }
   }
 
@@ -184,44 +199,53 @@ export async function dispatchDueNotifications(): Promise<number> {
 
 /**
  * Re-queue FAILED notifications that are within the retry window.
- * Exponential backoff: delays are taken from config.notifications.retryDelaysMinutes.
- * After maxRetries attempts the notification is marked DELIVERED (best-effort).
+ * Exponential backoff from DB config: default 1 min → 5 min → 30 min.
+ * After maxRetries attempts the notification stays FAILED permanently.
  * Called by the scheduler every 5 minutes.
  */
 export async function retryFailedNotifications(): Promise<number> {
   const now = new Date();
-  const windowStart = new Date(
-    now.getTime() - config.notifications.retryWindowHours * 3_600_000
-  );
 
-  const failed = await notificationRepository.findFailedForRetry(
-    config.notifications.maxRetries,
-    windowStart,
-    now
-  );
+  // Get all active orgs to read per-org retry config
+  const orgs = await prisma.organization.findMany({
+    where: { isActive: true },
+    select: { id: true },
+  });
 
   let retried = 0;
-  for (const n of failed) {
-    const newCount = n.retryCount + 1;
-    const delayMinutes =
-      config.notifications.retryDelaysMinutes[newCount - 1] ??
-      config.notifications.retryDelaysMinutes.at(-1) ??
-      30;
-    const nextRetryAt = new Date(now.getTime() + delayMinutes * 60_000);
+  for (const org of orgs) {
+    const maxRetries = await getConfigValue(org.id, CONFIG_KEYS.NOTIFICATION_MAX_RETRIES);
+    const windowHours = await getConfigValue(org.id, CONFIG_KEYS.NOTIFICATION_RETRY_WINDOW_HOURS);
+    const delays = await getRetryDelays(org.id);
 
-    try {
-      if (newCount >= config.notifications.maxRetries) {
-        // Final attempt exhausted — mark as permanently failed
-        await notificationRepository.markFailed(n.id, newCount, null);
-      } else {
-        await notificationRepository.scheduleRetry(n.id, newCount, nextRetryAt);
+    const windowStart = new Date(now.getTime() - windowHours * 3_600_000);
+    const failed = await notificationRepository.findFailedForRetry(
+      maxRetries,
+      windowStart,
+      now
+    );
+
+    for (const n of failed) {
+      if (n.organizationId !== org.id) continue;
+
+      const newCount = n.retryCount + 1;
+      const delayMinutes = delays[newCount - 1] ?? delays.at(-1) ?? 30;
+      const nextRetryAt = new Date(now.getTime() + delayMinutes * 60_000);
+
+      try {
+        if (newCount >= maxRetries) {
+          // Final attempt exhausted — mark as permanently failed
+          await notificationRepository.markFailed(n.id, newCount, null);
+        } else {
+          await notificationRepository.scheduleRetry(n.id, newCount, nextRetryAt);
+        }
+        retried++;
+      } catch (err) {
+        logger.error("Retry update failed", {
+          notificationId: n.id,
+          error: (err as Error).message,
+        });
       }
-      retried++;
-    } catch (err) {
-      logger.error("Retry update failed", {
-        notificationId: n.id,
-        error: (err as Error).message,
-      });
     }
   }
 

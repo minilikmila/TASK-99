@@ -2,7 +2,6 @@ import express from "express";
 import helmet from "helmet";
 import cors from "cors";
 import compression from "compression";
-import morgan from "morgan";
 
 import { correlationIdMiddleware } from "./middleware/correlationId";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
@@ -26,13 +25,31 @@ export function createApp(): express.Application {
   // ─── Correlation ID (tracing) ─────────────────────────────────────────────
   app.use(correlationIdMiddleware);
 
-  // ─── HTTP request logging ────────────────────────────────────────────────
-  app.use(
-    morgan("combined", {
-      stream: { write: (msg) => logger.info(msg.trim()) },
-      skip: (_req, res) => res.statusCode < 400,
-    })
-  );
+  // ─── Structured HTTP access logging with redaction ────────────────────────
+  // Replaces morgan("combined") with structured fields routed through the
+  // masking logger. Tokens, auth headers, IPs, and other PII are redacted.
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on("finish", () => {
+      const duration = Date.now() - start;
+      // Only log 4xx/5xx to reduce noise (same as previous morgan skip)
+      if (res.statusCode >= 400) {
+        logger.info("http_request", {
+          method: req.method,
+          url: req.originalUrl,
+          status: res.statusCode,
+          durationMs: duration,
+          correlationId: req.correlationId,
+          // These keys will be redacted by the maskFields format in logger.ts
+          authorization: req.headers.authorization ?? undefined,
+          ipAddress: req.ip ?? req.socket.remoteAddress,
+          userAgent: req.headers["user-agent"],
+          userId: req.user?.id,
+        });
+      }
+    });
+    next();
+  });
 
   // ─── API routes (versioned at /api/v1) ───────────────────────────────────
   app.use("/api/v1", routes);

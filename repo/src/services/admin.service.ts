@@ -327,6 +327,7 @@ export async function createBooking(
   }
 
   const booking = await adminRepository.createBooking({
+    organizationId,
     venueId,
     bookedById: actorId,
     title: input.title,

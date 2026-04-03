@@ -136,6 +136,7 @@ export const adminRepository = {
   },
 
   createBooking(data: {
+    organizationId: string;
     venueId: string;
     bookedById: string;
     title: string;

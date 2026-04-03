@@ -2,6 +2,7 @@ import { RecycleBinItem, RecycleBinItemType, Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 
 export interface CreateRecycleItemInput {
+  organizationId: string;
   itemType: RecycleBinItemType;
   threadId?: string;
   replyId?: string;
@@ -41,13 +42,7 @@ export const recycleRepository = {
     now: Date
   ): Promise<RecycleBinItemWithContent[]> {
     return prisma.recycleBinItem.findMany({
-      where: {
-        expiresAt: { gt: now },
-        OR: [
-          { thread: { organizationId } },
-          { reply: { thread: { organizationId } } },
-        ],
-      },
+      where: { organizationId, expiresAt: { gt: now } },
       include: recycleBinInclude,
       orderBy: { deletedAt: "desc" },
     });
@@ -55,13 +50,7 @@ export const recycleRepository = {
 
   findByIdInOrg(id: string, organizationId: string): Promise<RecycleBinItemWithContent | null> {
     return prisma.recycleBinItem.findFirst({
-      where: {
-        id,
-        OR: [
-          { thread: { organizationId } },
-          { reply: { thread: { organizationId } } },
-        ],
-      },
+      where: { id, organizationId },
       include: recycleBinInclude,
     });
   },

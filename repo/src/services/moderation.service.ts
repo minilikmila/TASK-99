@@ -6,7 +6,7 @@ import { auditRepository } from "../repositories/audit.repository";
 import { notifyModerationAction } from "./notification.service";
 import { AppError } from "../middleware/errorHandler";
 import { ErrorCode } from "../types";
-import { config } from "../config";
+import { getConfigValue, CONFIG_KEYS } from "./org-config.service";
 import type {
   MuteInput,
   BulkContentInput,
@@ -173,12 +173,14 @@ export async function bulkContentAction(
         }
         await threadRepository.update(threadId, { state: "LOCKED" });
       } else if (input.action === "delete_threads") {
+        const retentionDays = await getConfigValue(organizationId, CONFIG_KEYS.RECYCLE_BIN_RETENTION_DAYS);
         const now = new Date();
         const expiresAt = new Date(
-          now.getTime() + config.forum.recycleBinRetentionDays * 86_400_000
+          now.getTime() + retentionDays * 86_400_000
         );
         await threadRepository.softDelete(threadId, now);
         await recycleRepository.create({
+          organizationId,
           itemType: "THREAD",
           threadId,
           deletedById: actorId,

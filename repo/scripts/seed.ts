@@ -71,6 +71,34 @@ async function main(): Promise<void> {
   }
   console.log("Risk threshold flags seeded.");
 
+  // All operational config (DB-driven)
+  const allConfigs = [
+    { key: "forum.max_pinned_per_section",     description: "3"   },
+    { key: "forum.max_reply_depth",            description: "3"   },
+    { key: "forum.recycle_bin_retention_days",  description: "30"  },
+    { key: "forum.bulk_action_max_items",       description: "100" },
+    { key: "forum.mute_duration_min_hours",     description: "24"  },
+    { key: "forum.mute_duration_max_hours",     description: "720" },
+    { key: "auth.lockout_attempts",            description: "5"   },
+    { key: "auth.lockout_window_minutes",      description: "15"  },
+    { key: "rate_limit.writes_per_min",        description: "120" },
+    { key: "rate_limit.reads_per_min",         description: "600" },
+    { key: "notification.max_retries",         description: "3"   },
+    { key: "notification.retry_delay_1_min",   description: "1"   },
+    { key: "notification.retry_delay_2_min",   description: "5"   },
+    { key: "notification.retry_delay_3_min",   description: "30"  },
+    { key: "notification.retry_window_hours",  description: "24"  },
+    { key: "backup.retention_days",            description: "14"  },
+  ];
+  for (const f of allConfigs) {
+    await prisma.featureFlag.upsert({
+      where: { organizationId_key: { organizationId: org.id, key: f.key } },
+      update: { description: f.description },
+      create: { organizationId: org.id, key: f.key, value: true, description: f.description },
+    });
+  }
+  console.log("All operational config flags seeded.");
+
   console.log("Seed complete.");
 }
 

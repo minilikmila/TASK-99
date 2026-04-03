@@ -73,6 +73,7 @@ export async function handleUpdateSubscriptions(
 
       await notificationRepository.upsertSubscription(
         req.user!.id,
+        req.user!.organizationId,
         sub.category,
         sub.isOptIn
       );

@@ -7,7 +7,6 @@ export const createThreadSchema = z.object({
   title: z.string().min(1).max(500),
   body: z.string().min(1).max(50_000),
   tagIds: z.array(z.string().min(1)).max(20).optional(),
-  isFeatured: z.boolean().optional(),
 });
 
 export const updateThreadSchema = z.object({

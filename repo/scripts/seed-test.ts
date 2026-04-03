@@ -29,6 +29,13 @@ export const SECTION_IDS = {
   beta:  "ts-section-beta",
 } as const;
 
+// ── Second organization (for cross-tenant isolation tests) ──────────────────
+export const OTHER_ORG_ID      = "other-org-id";
+export const OTHER_ORG_SLUG    = "other-org";
+export const OTHER_USER_ID     = "other-user-id";
+export const OTHER_SECTION_ID  = "other-section-id";
+export const OTHER_TAG_ID      = "other-tag-id";
+
 // ─── User credential definitions ─────────────────────────────────────────────
 
 const USERS: Array<{
@@ -114,6 +121,72 @@ async function main(): Promise<void> {
     });
   }
   console.log("[seed-test] Risk threshold flags seeded.");
+
+  // All operational config (DB-driven)
+  const allConfigs = [
+    // Forum
+    { key: "forum.max_pinned_per_section",     description: "3"   },
+    { key: "forum.max_reply_depth",            description: "3"   },
+    { key: "forum.recycle_bin_retention_days",  description: "30"  },
+    { key: "forum.bulk_action_max_items",       description: "100" },
+    { key: "forum.mute_duration_min_hours",     description: "24"  },
+    { key: "forum.mute_duration_max_hours",     description: "720" },
+    // Auth lockout
+    { key: "auth.lockout_attempts",            description: "5"   },
+    { key: "auth.lockout_window_minutes",      description: "1"   }, // short for tests
+    // Rate limits
+    { key: "rate_limit.writes_per_min",        description: "2000" },
+    { key: "rate_limit.reads_per_min",         description: "10000" },
+    // Notification retry
+    { key: "notification.max_retries",         description: "3"   },
+    { key: "notification.retry_delay_1_min",   description: "1"   },
+    { key: "notification.retry_delay_2_min",   description: "5"   },
+    { key: "notification.retry_delay_3_min",   description: "30"  },
+    { key: "notification.retry_window_hours",  description: "24"  },
+    // Backup
+    { key: "backup.retention_days",            description: "14"  },
+  ];
+  for (const f of allConfigs) {
+    await prisma.featureFlag.upsert({
+      where: { organizationId_key: { organizationId: org.id, key: f.key } },
+      update: { description: f.description },
+      create: { organizationId: org.id, key: f.key, value: true, description: f.description },
+    });
+  }
+  console.log("[seed-test] All operational config flags seeded.");
+
+  // ── Second organization (for cross-tenant isolation tests) ──────────────
+  const org2 = await prisma.organization.upsert({
+    where: { slug: OTHER_ORG_SLUG },
+    update: { name: "Other Organization", isActive: true },
+    create: { id: OTHER_ORG_ID, name: "Other Organization", slug: OTHER_ORG_SLUG, isActive: true },
+  });
+  console.log(`[seed-test] Other org: ${org2.slug} (${org2.id})`);
+
+  // User in the other org
+  const otherPwHash = await bcrypt.hash("other-password-secure", 10);
+  await prisma.user.upsert({
+    where: { organizationId_username: { organizationId: org2.id, username: "other-user" } },
+    update: { passwordHash: otherPwHash, role: "USER", isBanned: false, muteUntil: null },
+    create: { id: OTHER_USER_ID, organizationId: org2.id, username: "other-user", passwordHash: otherPwHash, role: "USER" },
+  });
+  console.log("[seed-test] Other org user seeded");
+
+  // Section in the other org
+  await prisma.section.upsert({
+    where: { id: OTHER_SECTION_ID },
+    update: { name: "Other Org Section" },
+    create: { id: OTHER_SECTION_ID, organizationId: org2.id, name: "Other Org Section", description: "Belongs to other org" },
+  });
+  console.log("[seed-test] Other org section seeded");
+
+  // Tag in the other org
+  await prisma.tag.upsert({
+    where: { organizationId_slug: { organizationId: org2.id, slug: "other-tag" } },
+    update: { name: "Other Tag" },
+    create: { id: OTHER_TAG_ID, organizationId: org2.id, name: "Other Tag", slug: "other-tag" },
+  });
+  console.log("[seed-test] Other org tag seeded");
 
   console.log("[seed-test] Done.");
 }

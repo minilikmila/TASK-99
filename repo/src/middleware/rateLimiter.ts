@@ -1,11 +1,13 @@
 /**
  * In-memory sliding window rate limiter.
+ * Limits are read from DB config (org-scoped) with env fallbacks.
  * Single-instance only — no distributed consistency.
  */
 import { Request, Response, NextFunction } from "express";
 import { config } from "../config";
 import { AppError } from "./errorHandler";
 import { ErrorCode } from "../types";
+import { getConfigValue, CONFIG_KEYS } from "../services/org-config.service";
 
 interface WindowEntry {
   timestamps: number[];
@@ -45,32 +47,41 @@ setInterval(() => {
   }
 }, 60_000);
 
-export function readRateLimiter(
+export async function readRateLimiter(
   req: Request,
   _res: Response,
   next: NextFunction
-): void {
+): Promise<void> {
   const userId = req.user?.id ?? req.ip ?? "anonymous";
   const key = `read:${userId}`;
-  if (!isAllowed(key, config.rateLimit.readsPerMin)) {
-    throw new AppError(429, ErrorCode.RATE_LIMITED, "Read rate limit exceeded");
+  // Read limit from DB config if org context is available, else env fallback
+  let limit = config.rateLimit.readsPerMin;
+  if (req.user?.organizationId) {
+    try {
+      limit = await getConfigValue(req.user.organizationId, CONFIG_KEYS.RATE_LIMIT_READS_PER_MIN);
+    } catch { /* fallback to env */ }
+  }
+  if (!isAllowed(key, limit)) {
+    return next(new AppError(429, ErrorCode.RATE_LIMITED, "Read rate limit exceeded"));
   }
   next();
 }
 
-export function writeRateLimiter(
+export async function writeRateLimiter(
   req: Request,
   _res: Response,
   next: NextFunction
-): void {
+): Promise<void> {
   const userId = req.user?.id ?? req.ip ?? "anonymous";
   const key = `write:${userId}`;
-  if (!isAllowed(key, config.rateLimit.writesPerMin)) {
-    throw new AppError(
-      429,
-      ErrorCode.RATE_LIMITED,
-      "Write rate limit exceeded"
-    );
+  let limit = config.rateLimit.writesPerMin;
+  if (req.user?.organizationId) {
+    try {
+      limit = await getConfigValue(req.user.organizationId, CONFIG_KEYS.RATE_LIMIT_WRITES_PER_MIN);
+    } catch { /* fallback to env */ }
+  }
+  if (!isAllowed(key, limit)) {
+    return next(new AppError(429, ErrorCode.RATE_LIMITED, "Write rate limit exceeded"));
   }
   next();
 }

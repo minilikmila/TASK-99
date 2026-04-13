@@ -12,7 +12,14 @@
       "Bash(TEST_BASE_URL=http://localhost:3011 npx jest --testPathPattern=\"API_tests/thread-report\" --verbose --forceExit --runInBand)",
       "Bash(TEST_BASE_URL=http://localhost:3011 npx jest --testPathPattern=API_tests --forceExit --runInBand)",
       "Bash(TEST_BASE_URL=http://localhost:3011 npx jest --testPathPattern=\"API_tests/threads\" --verbose --forceExit --runInBand)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(npm ci:*)",
+      "Bash(npm install:*)",
+      "Bash(git -C /Users/minilik/projects/eaglepoint/TASK-99 ls-files README.md)",
+      "Bash(git -C /Users/minilik/projects/eaglepoint/TASK-99 show HEAD:README.md)",
+      "Bash(git:*)",
+      "Bash(grep -v '^\\\\.\\\\.$')"
     ]
   }
 }

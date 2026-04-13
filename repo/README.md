@@ -94,6 +94,8 @@ cd repo && docker compose down -v
 
 ## Running Tests
 
+All tests run fully inside Docker — no host-side Node.js, npm, or jest required.
+
 ### One-click (unit + API — recommended)
 
 ```bash
@@ -101,33 +103,31 @@ bash repo/run_tests.sh
 ```
 
 This script:
-1. Runs all unit tests (`npm run test:unit`).
-2. Starts the test containers (`docker-compose.test.yml`) with an isolated in-memory database.
-3. Waits for the health check to pass.
-4. Runs all API tests against `http://localhost:3011`.
-5. Tears down the test containers.
+1. Builds the test images.
+2. Runs all unit tests inside a Docker container (no DB required).
+3. Starts the DB and app containers, waits for health checks.
+4. Runs all API tests inside a Docker container against the app.
+5. Tears down all containers and volumes.
 6. Prints a final pass/fail summary.
 
 Expected output (all passing):
 
 ```
-▶ Running unit tests
+▶ Building test images
+✔  Images built
+
+▶ Running unit tests (containerized)
   ✔ isBanned returns true when isBanned=true
   ✔ thread state: ACTIVE → LOCKED allowed
   ... (60+ unit tests)
+✔  Unit tests passed
 
-▶ Starting test containers (docker-compose.test.yml)
-▶ Waiting for application health check (timeout: 120s)
-  ✔ Health check passed (12s)
-
-  Health response:
-    {"status":"ok","timestamp":"...","services":{"database":"ok"}}
-
-▶ Running API tests
+▶ Running API tests (containerized — starting DB + app)
   ✔ POST /auth/login → success (200)
   ✔ GET /auth/me → returns user profile
   ✔ banned user → 403 on login
   ... (80+ API tests)
+✔  API tests passed
 
 ════════════════════════════════════════
   TEST SUMMARY
@@ -140,12 +140,6 @@ Expected output (all passing):
 ```
 
 ### Unit tests only (no database required)
-
-```bash
-cd repo && npm run test:unit
-```
-
-Or via the script:
 
 ```bash
 bash repo/run_tests.sh --unit
@@ -163,21 +157,7 @@ Tests cover:
 - Feature flag key validation and CRUD logic
 - Input validation (login, thread, mute, bulk action, feature flag, role change schemas)
 
-### API tests only (containers must already be up)
-
-Start the test stack first:
-
-```bash
-cd repo && docker compose -f docker-compose.test.yml up --build
-```
-
-Then in a separate terminal:
-
-```bash
-cd repo && TEST_BASE_URL=http://localhost:3011 npm run test:api
-```
-
-Or via the script (skips `docker compose up` if app is already reachable):
+### API tests only
 
 ```bash
 bash repo/run_tests.sh --api
@@ -194,7 +174,7 @@ API tests cover:
 ### Tear down test containers
 
 ```bash
-cd repo && docker compose -f docker-compose.test.yml down --volumes
+cd repo && docker compose -f docker-compose.test.yml --profile test down --volumes
 ```
 
 ---

@@ -62,7 +62,8 @@ function maskFields(obj: Record<string, unknown>): Record<string, unknown> {
 }
 
 const maskSensitive = winston.format((info) => {
-  return maskFields(info as unknown as Record<string, unknown>) as typeof info;
+  Object.assign(info, maskFields(info as unknown as Record<string, unknown>));
+  return info;
 });
 
 // ─── Logger ───────────────────────────────────────────────────────────────────

@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# run_tests.sh — One-click test runner for CivicForum Operations Platform
+# run_tests.sh — Fully containerized test runner for CivicForum Operations Platform
+#
+# All tests execute inside Docker — no host-side Node.js, npm, or jest required.
 #
 # Usage:
-#   bash run_tests.sh           # run unit + API tests (starts test containers)
-#   bash run_tests.sh --unit    # unit tests only (no Docker required)
-#   bash run_tests.sh --api     # API tests only (containers must already be up)
+#   bash run_tests.sh           # run unit + API tests
+#   bash run_tests.sh --unit    # unit tests only (no DB required)
+#   bash run_tests.sh --api     # API tests only (starts DB + app)
 #
 # Requirements:
-#   - Node.js + npm (for unit tests)
-#   - Docker + Docker Compose (for API tests)
+#   - Docker + Docker Compose
 #
 set -euo pipefail
 
@@ -22,16 +23,10 @@ RESET='\033[0m'
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 COMPOSE_FILE="docker-compose.test.yml"
-# Test stack publishes app on fixed host port 3011.
-TEST_BASE_URL="${TEST_BASE_URL:-http://localhost:3011}"
-HEALTH_URL="${TEST_BASE_URL}/api/v1/health"
-HEALTH_TIMEOUT=120   # seconds to wait for the app to become healthy
-HEALTH_INTERVAL=3    # seconds between health checks
 
 # ─── Argument parsing ─────────────────────────────────────────────────────────
 RUN_UNIT=true
 RUN_API=true
-MANAGED_COMPOSE=false   # whether this script started the containers
 
 for arg in "$@"; do
   case "$arg" in
@@ -47,36 +42,14 @@ ok()      { echo -e "${GREEN}✔  $*${RESET}"; }
 fail()    { echo -e "${RED}✖  $*${RESET}"; }
 warn()    { echo -e "${YELLOW}⚠  $*${RESET}"; }
 
-# Ensure local dev dependencies exist before running host-side jest commands.
-ensure_local_test_deps() {
-  if [ ! -x "node_modules/.bin/jest" ]; then
-    section "Installing local test dependencies (npm ci)"
-    npm ci
-    ok "Dependencies installed"
-  fi
-}
-
-# Only treat the port as "our" test server if health JSON matches this app
-# (avoids false positives when another stack already listens on the test port).
-civicforum_health_ok() {
-  local body
-  body=$(curl -sf "$HEALTH_URL" 2>/dev/null) || return 1
-  echo "$body" | grep -q '"services"' || return 1
-  echo "$body" | grep -q '"database"' || return 1
-  return 0
-}
-
-# ─── Trap: always print summary and optionally tear down ─────────────────────
+# ─── Trap: always tear down and print summary ────────────────────────────────
 UNIT_EXIT=0
 API_EXIT=0
 
 cleanup() {
-  local exit_code=$?
-  if $MANAGED_COMPOSE && $RUN_API; then
-    section "Stopping test containers"
-    docker compose -f "$COMPOSE_FILE" down --volumes --timeout 10 \
-      >/dev/null 2>&1 && ok "Containers stopped" || warn "Container stop returned non-zero (ignored)"
-  fi
+  section "Stopping containers"
+  docker compose -f "$COMPOSE_FILE" --profile test down --volumes --timeout 10 \
+    >/dev/null 2>&1 && ok "Containers stopped" || warn "Container stop returned non-zero (ignored)"
 
   # ── Final summary ────────────────────────────────────────────────────────
   echo ""
@@ -116,12 +89,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# ─── Unit tests ───────────────────────────────────────────────────────────────
+# ─── Build ────────────────────────────────────────────────────────────────────
+section "Building test images"
+docker compose -f "$COMPOSE_FILE" --profile test build
+ok "Images built"
+
+# ─── Unit tests (containerized, no DB) ───────────────────────────────────────
 if $RUN_UNIT; then
-  ensure_local_test_deps
-  section "Running unit tests"
+  section "Running unit tests (containerized)"
   set +e
-  npm run test:unit
+  docker compose -f "$COMPOSE_FILE" run --rm --no-deps --entrypoint "" test-runner \
+    npx jest --testPathPattern=unit_tests --verbose --forceExit
   UNIT_EXIT=$?
   set -e
   if [ "$UNIT_EXIT" -eq 0 ]; then
@@ -131,54 +109,14 @@ if $RUN_UNIT; then
   fi
 fi
 
-# ─── API tests ────────────────────────────────────────────────────────────────
+# ─── API tests (containerized, starts DB + app) ──────────────────────────────
 if $RUN_API; then
-  ensure_local_test_deps
-
-  # Start compose unless a real CivicForum health endpoint is already up on TEST_BASE_URL
-  if civicforum_health_ok; then
-    warn "CivicForum test server already healthy at $TEST_BASE_URL — skipping docker compose up"
-  else
-    if curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
-      warn "Something responds on $HEALTH_URL but it is not CivicForum health — starting $COMPOSE_FILE (needs free host port)"
-    fi
-    section "Starting test containers ($COMPOSE_FILE)"
-    if ! docker compose -f "$COMPOSE_FILE" up --build --detach; then
-      fail "docker compose up failed — is host port 3011 already in use? Stop the other service that uses it."
-      API_EXIT=1
-      exit 1
-    fi
-    MANAGED_COMPOSE=true
-    ok "Containers started"
-  fi
-
-  # Wait for health check
-  section "Waiting for application health check (timeout: ${HEALTH_TIMEOUT}s)"
-  elapsed=0
-  until civicforum_health_ok; do
-    if [ "$elapsed" -ge "$HEALTH_TIMEOUT" ]; then
-      fail "Application did not become healthy within ${HEALTH_TIMEOUT}s"
-      echo ""
-      echo "Container logs:"
-      docker compose -f "$COMPOSE_FILE" logs --tail=50 app-test 2>/dev/null || true
-      API_EXIT=1
-      exit 1
-    fi
-    printf "  waiting... (%ds)\r" "$elapsed"
-    sleep "$HEALTH_INTERVAL"
-    elapsed=$(( elapsed + HEALTH_INTERVAL ))
-  done
-  ok "Health check passed (${elapsed}s)"
-
-  # Show health response
-  echo ""
-  echo "  Health response:"
-  curl -sf "$HEALTH_URL" | sed 's/^/    /' || true
-  echo ""
-
-  section "Running API tests"
+  section "Running API tests (containerized — starting DB + app)"
+  # docker compose run honours depends_on conditions: it starts db-test and
+  # app-test, waits for their health checks, then executes the test command.
   set +e
-  TEST_BASE_URL="$TEST_BASE_URL" npm run test:api
+  docker compose -f "$COMPOSE_FILE" run --rm --entrypoint "" test-runner \
+    npx jest --testPathPattern=API_tests --verbose --forceExit --runInBand
   API_EXIT=$?
   set -e
   if [ "$API_EXIT" -eq 0 ]; then

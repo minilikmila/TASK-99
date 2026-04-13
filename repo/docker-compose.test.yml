@@ -1,10 +1,10 @@
 # Isolated test environment — separate DB, fixed host port 3011, high rate limits.
 # Spun up and torn down automatically by run_tests.sh.
 #
-# Usage:
-#   docker compose -f docker-compose.test.yml up --build -d
-#   TEST_BASE_URL=http://localhost:3011 npx jest --testPathPattern=API_tests
-#   docker compose -f docker-compose.test.yml down -v
+# Usage (all-in-Docker):
+#   bash run_tests.sh           # unit + API tests
+#   bash run_tests.sh --unit    # unit tests only
+#   bash run_tests.sh --api     # API tests only
 
 services:
   db-test:
@@ -56,3 +56,19 @@ services:
       retries: 30
       start_period: 40s
     entrypoint: ["sh", "scripts/entrypoint.test.sh"]
+
+  # Ephemeral container for running jest inside Docker.
+  # Used by run_tests.sh — not started by default (`profiles: [test]`).
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: "no"
+    profiles: ["test"]
+    depends_on:
+      app-test:
+        condition: service_healthy
+    environment:
+      NODE_ENV:         test
+      TEST_BASE_URL:    http://app-test:3000
+      INTERNAL_API_KEY: test-internal-key-secret

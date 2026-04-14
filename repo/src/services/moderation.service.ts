@@ -249,8 +249,40 @@ export async function restoreItem(
     );
   }
 
+  let autoUnpinned = false;
+
   if (item.itemType === "THREAD" && item.thread) {
-    await threadRepository.update(item.thread.id, { deletedAt: null });
+    // If the thread was pinned, check section pin capacity before restoring.
+    // Use a serializable transaction to prevent races (same pattern as pinThread).
+    if (item.thread.isPinned) {
+      const maxPinned = await getConfigValue(organizationId, CONFIG_KEYS.MAX_PINNED_PER_SECTION);
+
+      await prisma.$transaction(async (tx) => {
+        const pinnedCount = await tx.thread.count({
+          where: {
+            organizationId,
+            sectionId: item.thread!.sectionId,
+            isPinned: true,
+            deletedAt: null,
+          },
+        });
+        if (pinnedCount >= maxPinned) {
+          // Auto-unpin the restored thread to preserve the invariant
+          await tx.thread.update({
+            where: { id: item.thread!.id },
+            data: { deletedAt: null, isPinned: false },
+          });
+          autoUnpinned = true;
+        } else {
+          await tx.thread.update({
+            where: { id: item.thread!.id },
+            data: { deletedAt: null },
+          });
+        }
+      }, { isolationLevel: "Serializable" });
+    } else {
+      await threadRepository.update(item.thread.id, { deletedAt: null });
+    }
   } else if (item.itemType === "REPLY" && item.reply) {
     // Dependency check: thread must still exist and not be deleted
     const parentThread = await threadRepository.findById(
@@ -279,6 +311,17 @@ export async function restoreItem(
     resourceType: item.itemType,
     resourceId: item.thread?.id ?? item.reply?.id,
   });
+
+  if (autoUnpinned) {
+    await auditRepository.create({
+      organizationId,
+      actorId,
+      eventType: "thread.auto_unpinned",
+      resourceType: "Thread",
+      resourceId: item.thread?.id,
+      details: { reason: "Section at pin capacity during restore" },
+    });
+  }
 }
 
 export async function purgeItem(

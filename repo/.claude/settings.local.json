@@ -19,7 +19,11 @@
       "Bash(git -C /Users/minilik/projects/eaglepoint/TASK-99 ls-files README.md)",
       "Bash(git -C /Users/minilik/projects/eaglepoint/TASK-99 show HEAD:README.md)",
       "Bash(git:*)",
-      "Bash(grep -v '^\\\\.\\\\.$')"
+      "Bash(grep -v '^\\\\.\\\\.$')",
+      "Bash(ls /Users/minilik/projects/eaglepoint/TASK-99/repo/.env*)",
+      "Bash(./node_modules/.bin/jest:*)",
+      "Bash(ls /Users/minilik/projects/eaglepoint/TASK-99/repo/node_modules/.bin/jest*)",
+      "Bash(node:*)"
     ]
   }
 }

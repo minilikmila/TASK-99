@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { notificationRepository } from "../repositories/notification.repository";
+import { AppError } from "../middleware/errorHandler";
+import { ErrorCode } from "../types";
 import {
   dispatchDueNotifications,
   retryFailedNotifications,
@@ -29,11 +31,14 @@ export async function handleOpenNotification(
   next: NextFunction
 ): Promise<void> {
   try {
-    await notificationRepository.markOpened(
+    const count = await notificationRepository.markOpened(
       req.params.notificationId,
       req.user!.id,
       new Date()
     );
+    if (count === 0) {
+      throw new AppError(404, ErrorCode.NOT_FOUND, "Notification not found");
+    }
     res.json({ message: "Marked as opened" });
   } catch (err) {
     next(err);

@@ -148,9 +148,31 @@ describe("validateStartupConfig", () => {
       ).not.toThrow();
     });
 
-    test("does NOT throw when NODE_ENV is absent", () => {
+    test("defaults to development when NODE_ENV is absent (no throw)", () => {
       expect(() =>
         validateStartupConfig({})
+      ).not.toThrow();
+    });
+  });
+
+  describe("staging / other environments enforce same rules as production", () => {
+    test("throws in staging when JWT_SECRET is weak", () => {
+      expect(() =>
+        validateStartupConfig({
+          NODE_ENV: "staging",
+          JWT_SECRET: "local-dev-weak-secret-that-is-long-enough",
+          INTERNAL_API_KEY: STRONG_KEY,
+        })
+      ).toThrow(/JWT_SECRET/);
+    });
+
+    test("does NOT throw in staging when both secrets are strong", () => {
+      expect(() =>
+        validateStartupConfig({
+          NODE_ENV: "staging",
+          JWT_SECRET: STRONG_SECRET,
+          INTERNAL_API_KEY: STRONG_KEY,
+        })
       ).not.toThrow();
     });
   });

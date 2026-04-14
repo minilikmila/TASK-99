@@ -20,7 +20,7 @@ interface NotificationLike {
 }
 
 function getNextRetryDelay(retryCount: number): number {
-  return RETRY_DELAYS_MINUTES[retryCount] ?? RETRY_DELAYS_MINUTES.at(-1) ?? 30;
+  return RETRY_DELAYS_MINUTES[retryCount] ?? RETRY_DELAYS_MINUTES[RETRY_DELAYS_MINUTES.length - 1] ?? 30;
 }
 
 function shouldRetry(

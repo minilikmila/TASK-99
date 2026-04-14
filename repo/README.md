@@ -22,11 +22,15 @@ cd /path/to/TASK-99
 cd repo && docker compose up --build
 ```
 
+> No `.env` file is required — development defaults are built into `docker-compose.yml`.
+> See `.env.example` for the full list of available environment variables.
+> In production, supply secrets (`JWT_SECRET`, `INTERNAL_API_KEY`) via your deployment system.
+
 This command:
 1. Builds the application image (installs npm deps, generates Prisma client, compiles TypeScript).
 2. Starts MySQL (`db` service) and waits for its health check to pass.
 3. Runs `prisma migrate deploy` to apply all migrations.
-4. Seeds default data (`default-org` + `admin`) automatically (idempotent).
+4. Seeds default data (`default-org` + admin user) automatically (idempotent). In development/test, a default admin is created. In production, set `ADMIN_USERNAME` and `ADMIN_PASSWORD` to bootstrap the first admin.
 5. Starts the Express server on port **3000**.
 
 > First build takes ~2–3 minutes. Subsequent starts are much faster.
@@ -41,13 +45,15 @@ This command:
 curl http://localhost:3000/api/v1/health
 ```
 
-### Login right away (auto-seeded)
+### Login right away (development only)
 
-Default credential available immediately after startup:
+When running in `development` mode (`NODE_ENV=development`), a default admin account is seeded automatically:
 
 - `organizationSlug`: `default-org`
 - `username`: `admin`
 - `password`: `admin-password-secure`
+
+> **Production bootstrap:** Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment variables before running `npm run seed` to provision the first administrator. The password must be at least 12 characters.
 
 Expected response (`200 OK`):
 
@@ -217,6 +223,7 @@ Base path: `/api/v1`
 | Risk | `GET /risk/flags` |
 
 All endpoints under `/api/v1` (except `/health` and `/auth/login`) require a `Bearer` token.  
+Internal job endpoints (`/internal/notifications/*`, `/internal/risk/*`) use an `X-Internal-Key` header instead of a Bearer token.  
 Every response includes an `X-Correlation-Id` header for request tracing.
 
 Endpoint details are documented inline via Zod schemas in `src/schemas/`.

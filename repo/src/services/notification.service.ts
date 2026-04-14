@@ -130,12 +130,15 @@ export async function notifyModerationAction(
 export async function notifyAnnouncementPublished(
   organizationId: string,
   title: string,
-  body: string
+  body: string,
+  scheduledAt?: Date
 ): Promise<void> {
   try {
     const userIds = await notificationRepository.findOrgUserIds(organizationId);
 
-    // Fan out one notification per user (fire-and-forget, log errors per user)
+    // Fan out one notification per user (fire-and-forget, log errors per user).
+    // If scheduledAt is in the future the notification stays PENDING until the
+    // dispatchDueNotifications job picks it up.
     await Promise.allSettled(
       userIds.map((userId) =>
         createNotification({
@@ -144,6 +147,7 @@ export async function notifyAnnouncementPublished(
           category: CATEGORY.ANNOUNCEMENT,
           title,
           body: body.slice(0, 500),
+          scheduledAt,
         })
       )
     );
@@ -186,7 +190,7 @@ export async function dispatchDueNotifications(): Promise<number> {
           await notificationRepository.markFailed(n.id, n.retryCount, null);
         } else {
           const delays = await getRetryDelays(n.organizationId);
-          const delayMinutes = delays[n.retryCount] ?? delays.at(-1) ?? 1;
+          const delayMinutes = delays[n.retryCount] ?? delays[delays.length - 1] ?? 1;
           const nextRetryAt = new Date(now.getTime() + delayMinutes * 60_000);
           await notificationRepository.markFailed(n.id, n.retryCount, nextRetryAt);
         }
@@ -236,7 +240,7 @@ export async function retryFailedNotifications(): Promise<number> {
 
     for (const n of failed) {
       const newCount = n.retryCount + 1;
-      const delayMinutes = delays[newCount - 1] ?? delays.at(-1) ?? 30;
+      const delayMinutes = delays[newCount - 1] ?? delays[delays.length - 1] ?? 30;
       const nextRetryAt = new Date(now.getTime() + delayMinutes * 60_000);
 
       try {

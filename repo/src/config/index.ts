@@ -51,6 +51,13 @@ export const config = {
     retryWindowHours: 24,
   },
 
+  alerts: {
+    errorThreshold: optionalNum("ALERT_ERROR_THRESHOLD", 50),
+    authFailureThreshold: optionalNum("ALERT_AUTH_FAILURE_THRESHOLD", 30),
+    rateLimitedThreshold: optionalNum("ALERT_RATE_LIMITED_THRESHOLD", 100),
+    windowMinutes: optionalNum("ALERT_WINDOW_MINUTES", 5),
+  },
+
   backup: {
     retentionDays: 14,
     volumePath: optional("BACKUP_VOLUME_PATH", "/backups"),

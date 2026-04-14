@@ -20,7 +20,7 @@ export async function handleListOrgs(
   next: NextFunction
 ): Promise<void> {
   try {
-    const orgs = await adminService.listOrganizations(req.user!.organizationId);
+    const orgs = await adminService.listOrganizations();
     res.json({ data: orgs });
   } catch (err) {
     next(err);

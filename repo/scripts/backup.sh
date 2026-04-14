@@ -35,13 +35,24 @@ fi
 
 mkdir -p "${BACKUP_DIR}"
 
-# ── Parse DATABASE_URL ───────────────────────────────────────────────────────
-# Format: mysql://user:pass@host:port/dbname
-DB_USER=$(echo "${DATABASE_URL}" | sed -E 's|mysql://([^:]+):.*|\1|')
-DB_PASS=$(echo "${DATABASE_URL}" | sed -E 's|mysql://[^:]+:([^@]+)@.*|\1|')
-DB_HOST=$(echo "${DATABASE_URL}" | sed -E 's|mysql://[^@]+@([^:]+):.*|\1|')
-DB_PORT=$(echo "${DATABASE_URL}" | sed -E 's|mysql://[^@]+@[^:]+:([0-9]+)/.*|\1|')
-DB_NAME=$(echo "${DATABASE_URL}" | sed -E 's|mysql://[^/]+/([^?]+).*|\1|')
+# ── Resolve DB connection details ────────────────────────────────────────────
+# Prefer explicit env vars (safe for passwords with special characters).
+# Fall back to parsing DATABASE_URL only when the explicit vars are absent.
+if [[ -n "${DB_HOST:-}" && -n "${DB_USER:-}" && -n "${DB_NAME:-}" ]]; then
+  DB_HOST="${DB_HOST}"
+  DB_PORT="${DB_PORT:-3306}"
+  DB_USER="${DB_USER}"
+  DB_PASS="${DB_PASS:-}"
+  DB_NAME="${DB_NAME}"
+else
+  # Fallback: parse DATABASE_URL (mysql://user:pass@host:port/dbname).
+  # NOTE: This regex can break if the password contains '@' or ':'.
+  DB_USER=$(echo "${DATABASE_URL}" | sed -E 's|mysql://([^:]+):.*|\1|')
+  DB_PASS=$(echo "${DATABASE_URL}" | sed -E 's|mysql://[^:]+:([^@]+)@.*|\1|')
+  DB_HOST=$(echo "${DATABASE_URL}" | sed -E 's|mysql://[^@]+@([^:]+):.*|\1|')
+  DB_PORT=$(echo "${DATABASE_URL}" | sed -E 's|mysql://[^@]+@[^:]+:([0-9]+)/.*|\1|')
+  DB_NAME=$(echo "${DATABASE_URL}" | sed -E 's|mysql://[^/]+/([^?]+).*|\1|')
+fi
 
 # ── Run dump ─────────────────────────────────────────────────────────────────
 echo "[backup] Starting backup → ${DUMP_FILE}"

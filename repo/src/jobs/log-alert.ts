@@ -8,6 +8,7 @@
  */
 
 import { logger } from "../lib/logger";
+import { config } from "../config";
 
 // ─── Sliding window counters ─────────────────────────────────────────────────
 
@@ -21,7 +22,7 @@ const counters: Record<string, Counter> = {
   rate_limited: { timestamps: [] },
 };
 
-const WINDOW_MS = 5 * 60_000; // 5-minute sliding window
+const WINDOW_MS = config.alerts.windowMinutes * 60_000;
 
 function prune(counter: Counter, now: number): void {
   const cutoff = now - WINDOW_MS;
@@ -48,18 +49,18 @@ interface AlertRule {
 const ALERT_RULES: AlertRule[] = [
   {
     category: "error",
-    threshold: 50,
-    message: "High error rate: ≥50 errors in 5 minutes",
+    threshold: config.alerts.errorThreshold,
+    message: `High error rate: ≥${config.alerts.errorThreshold} errors in ${config.alerts.windowMinutes} minutes`,
   },
   {
     category: "auth_failure",
-    threshold: 30,
-    message: "High auth failure rate: ≥30 auth failures in 5 minutes",
+    threshold: config.alerts.authFailureThreshold,
+    message: `High auth failure rate: ≥${config.alerts.authFailureThreshold} auth failures in ${config.alerts.windowMinutes} minutes`,
   },
   {
     category: "rate_limited",
-    threshold: 100,
-    message: "Excessive rate limiting: ≥100 429 responses in 5 minutes",
+    threshold: config.alerts.rateLimitedThreshold,
+    message: `Excessive rate limiting: ≥${config.alerts.rateLimitedThreshold} 429 responses in ${config.alerts.windowMinutes} minutes`,
   },
 ];
 

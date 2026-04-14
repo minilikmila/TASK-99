@@ -25,12 +25,9 @@ import type {
 
 // ─── Organizations ────────────────────────────────────────────────────────────
 
-export async function listOrganizations(
-  actorOrgId: string
-): Promise<Organization[]> {
-  // Scoped to the actor's own organization — prevents cross-tenant data leakage
-  const org = await organizationRepository.findById(actorOrgId);
-  return org ? [org] : [];
+export async function listOrganizations(): Promise<Organization[]> {
+  // Platform-level view — admin-only route returns all organizations
+  return organizationRepository.findAll();
 }
 
 export async function createOrganization(
@@ -128,7 +125,14 @@ export async function createAnnouncement(
   });
 
   if (item.isPublished) {
-    void notifyAnnouncementPublished(organizationId, item.title, item.body);
+    // If startAt is in the future, schedule the notification for that time
+    // instead of delivering immediately.
+    const now = new Date();
+    const scheduledAt = item.startAt && item.startAt > now ? item.startAt : undefined;
+    // Skip notification entirely if the announcement has already expired
+    if (!item.endAt || item.endAt > now) {
+      void notifyAnnouncementPublished(organizationId, item.title, item.body, scheduledAt);
+    }
   }
 
   return item;
@@ -165,7 +169,11 @@ export async function updateAnnouncement(
 
   // Notify org users when an announcement transitions to published
   if (input.isPublished && !existing.isPublished) {
-    void notifyAnnouncementPublished(organizationId, updated.title, updated.body);
+    const now = new Date();
+    const scheduledAt = updated.startAt && updated.startAt > now ? updated.startAt : undefined;
+    if (!updated.endAt || updated.endAt > now) {
+      void notifyAnnouncementPublished(organizationId, updated.title, updated.body, scheduledAt);
+    }
   }
 
   return updated;

@@ -10,6 +10,8 @@ const prisma = new PrismaClient();
 async function main(): Promise<void> {
   console.log("Seeding database...");
 
+  const env = process.env.NODE_ENV ?? "development";
+
   // Create default organization
   const org = await prisma.organization.upsert({
     where: { slug: "default-org" },
@@ -22,24 +24,37 @@ async function main(): Promise<void> {
   });
   console.log(`Organization: ${org.slug} (${org.id})`);
 
-  // Create admin user
-  const passwordHash = await bcrypt.hash("admin-password-secure", 12);
-  const admin = await prisma.user.upsert({
-    where: {
-      organizationId_username: {
-        organizationId: org.id,
-        username: "admin",
+  // In development/test: seed a default admin with known credentials.
+  // In production: provision via ADMIN_USERNAME + ADMIN_PASSWORD env vars.
+  const adminUsername = process.env.ADMIN_USERNAME ?? (env === "development" || env === "test" ? "admin" : "");
+  const adminPassword = process.env.ADMIN_PASSWORD ?? (env === "development" || env === "test" ? "admin-password-secure" : "");
+
+  if (adminUsername && adminPassword) {
+    if (adminPassword.length < 12) {
+      throw new Error("ADMIN_PASSWORD must be at least 12 characters");
+    }
+    const passwordHash = await bcrypt.hash(adminPassword, 12);
+    const admin = await prisma.user.upsert({
+      where: {
+        organizationId_username: {
+          organizationId: org.id,
+          username: adminUsername,
+        },
       },
-    },
-    update: {},
-    create: {
-      organizationId: org.id,
-      username: "admin",
-      passwordHash,
-      role: "ADMINISTRATOR",
-    },
-  });
-  console.log(`Admin user: ${admin.username} (${admin.id})`);
+      update: {},
+      create: {
+        organizationId: org.id,
+        username: adminUsername,
+        passwordHash,
+        role: "ADMINISTRATOR",
+      },
+    });
+    console.log(`Admin user: ${admin.username} (${admin.id})`);
+  } else {
+    console.log(
+      "Skipping admin user seed. Set ADMIN_USERNAME and ADMIN_PASSWORD to provision an admin."
+    );
+  }
 
   // Create default section
   const section = await prisma.section.upsert({

@@ -8,6 +8,7 @@ import {
 } from "../services/notification.service";
 import { runRiskRules } from "../services/risk.service";
 import { checkAlertThresholds } from "./log-alert";
+import { adminRepository } from "../repositories/admin.repository";
 import { prisma } from "../lib/prisma";
 import { config } from "../config";
 
@@ -111,6 +112,28 @@ async function runNightlyBackup(): Promise<void> {
   });
 }
 
+async function deactivateExpiredContent(): Promise<void> {
+  const now = new Date();
+
+  const expiredAnnouncements = await adminRepository.findExpiredAnnouncements(now);
+  for (const a of expiredAnnouncements) {
+    await adminRepository.updateAnnouncement(a.id, { isPublished: false });
+  }
+
+  const expiredCarousel = await adminRepository.findExpiredCarouselItems(now);
+  for (const c of expiredCarousel) {
+    await adminRepository.updateCarouselItem(c.id, { isActive: false });
+  }
+
+  const total = expiredAnnouncements.length + expiredCarousel.length;
+  if (total > 0) {
+    logger.info("Deactivated expired content", {
+      announcements: expiredAnnouncements.length,
+      carouselItems: expiredCarousel.length,
+    });
+  }
+}
+
 // ─── Scheduler ────────────────────────────────────────────────────────────────
 
 export function startScheduler(): void {
@@ -172,6 +195,17 @@ export function startScheduler(): void {
     }
   });
 
+  // Every 5 minutes: deactivate announcements/carousel items past their endAt
+  cron.schedule("*/5 * * * *", async () => {
+    try {
+      await deactivateExpiredContent();
+    } catch (err) {
+      logger.error("deactivateExpiredContent job failed", {
+        error: (err as Error).message,
+      });
+    }
+  });
+
   // Every hour: purge expired revoked tokens
   cron.schedule("0 * * * *", async () => {
     try {
@@ -206,6 +240,7 @@ export function startScheduler(): void {
       "alertThresholds (every 1 min)",
       "riskRules (every 15 min)",
       "recycleBinPurge (daily 02:00 UTC)",
+      "deactivateExpiredContent (every 5 min)",
       "revokedTokenPurge (every 1 hour)",
       "nightlyBackup (daily 02:30 UTC)",
     ],

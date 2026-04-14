@@ -1,73 +1,16 @@
 /**
  * Unit tests for Zod schema input validation.
  * Tests error cases for all major request schemas with no server or DB access.
+ *
+ * All schemas are imported directly from production code to prevent
+ * test/source divergence.
  */
 
 import { z } from "zod";
-
-// ─── Inline schemas (mirrors src/schemas/* exactly) ──────────────────────────
-
-const loginSchema = z.object({
-  organizationSlug: z.string().min(1, "Organization slug is required"),
-  username: z.string().min(1, "Username is required"),
-  password: z.string().min(12, "Password must be at least 12 characters"),
-});
-
-const createThreadSchema = z.object({
-  sectionId: z.string().min(1),
-  subsectionId: z.string().min(1).optional(),
-  title: z.string().min(1).max(500),
-  body: z.string().min(1).max(50_000),
-  tagIds: z.array(z.string().min(1)).max(20).optional(),
-  isFeatured: z.boolean().optional(),
-});
-
-const muteSchema = z.object({
-  durationHours: z
-    .number({ required_error: "durationHours is required" })
-    .int()
-    .min(24, "Minimum mute duration is 24 hours")
-    .max(720, "Maximum mute duration is 720 hours"),
-  reason: z.string().max(500).optional(),
-});
-
-const bulkContentSchema = z.object({
-  action: z.enum(["archive_threads", "lock_threads", "delete_threads"]),
-  threadIds: z
-    .array(z.string().min(1))
-    .min(1, "At least one thread required")
-    .max(100, "Maximum 100 items per request"),
-});
-
-const createFeatureFlagSchema = z.object({
-  key: z
-    .string()
-    .min(1)
-    .max(100)
-    .regex(/^[a-z][a-z0-9_]*$/, "Key must be lowercase snake_case"),
-  value: z.boolean().default(false),
-  description: z.string().max(500).optional(),
-});
-
-const changeRoleSchema = z.object({
-  role: z.enum(["ADMINISTRATOR", "MODERATOR", "ANALYST", "USER"]),
-});
-
-const auditLogQuerySchema = z.object({
-  actorId: z.string().optional(),
-  eventType: z.string().optional(),
-  resourceType: z.string().optional(),
-  fromDate: z.string().datetime({ message: "fromDate must be ISO 8601 UTC" }).optional(),
-  toDate: z.string().datetime({ message: "toDate must be ISO 8601 UTC" }).optional(),
-  page: z
-    .string()
-    .optional()
-    .transform((v) => Math.max(1, parseInt(v ?? "1", 10) || 1)),
-  pageSize: z
-    .string()
-    .optional()
-    .transform((v) => Math.min(100, Math.max(1, parseInt(v ?? "50", 10) || 50))),
-});
+import { loginSchema } from "../src/schemas/auth.schema";
+import { createThreadSchema } from "../src/schemas/thread.schema";
+import { muteSchema, bulkContentSchema, changeRoleSchema, auditLogQuerySchema } from "../src/schemas/moderation.schema";
+import { createFeatureFlagSchema } from "../src/schemas/feature-flag.schema";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -241,44 +184,37 @@ describe("createThreadSchema", () => {
     expect(err).toBeTruthy();
   });
 
-  test("isFeatured as non-boolean string → error", () => {
-    const err = issues(createThreadSchema, { ...valid, isFeatured: "yes" as unknown as boolean });
-    expect(err).toBeTruthy();
+  test("extra fields are stripped by schema (isFeatured not in create schema)", () => {
+    const result = createThreadSchema.safeParse({ ...valid, isFeatured: true });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect((result.data as Record<string, unknown>).isFeatured).toBeUndefined();
+    }
   });
 });
 
 // ─── muteSchema ───────────────────────────────────────────────────────────────
 
 describe("muteSchema", () => {
-  test("24 hours → valid (minimum boundary)", () => {
-    expect(muteSchema.safeParse({ durationHours: 24 }).success).toBe(true);
+  test("1 hour → valid (minimum boundary)", () => {
+    expect(muteSchema.safeParse({ durationHours: 1 }).success).toBe(true);
   });
 
-  test("720 hours → valid (maximum boundary)", () => {
-    expect(muteSchema.safeParse({ durationHours: 720 }).success).toBe(true);
+  test("8760 hours → valid (maximum boundary)", () => {
+    expect(muteSchema.safeParse({ durationHours: 8760 }).success).toBe(true);
   });
 
   test("48 hours with reason → valid", () => {
     expect(muteSchema.safeParse({ durationHours: 48, reason: "Spam" }).success).toBe(true);
   });
 
-  test("23 hours → error (below minimum)", () => {
-    const err = issues(muteSchema, { durationHours: 23 });
-    expect(err).toMatch(/Minimum mute duration/);
-  });
-
-  test("0 hours → error", () => {
+  test("0 hours → error (below minimum)", () => {
     const err = issues(muteSchema, { durationHours: 0 });
     expect(err).toMatch(/Minimum mute duration/);
   });
 
-  test("721 hours → error (above maximum)", () => {
-    const err = issues(muteSchema, { durationHours: 721 });
-    expect(err).toMatch(/Maximum mute duration/);
-  });
-
-  test("1000 hours → error", () => {
-    const err = issues(muteSchema, { durationHours: 1000 });
+  test("8761 hours → error (above maximum)", () => {
+    const err = issues(muteSchema, { durationHours: 8761 });
     expect(err).toMatch(/Maximum mute duration/);
   });
 
@@ -341,17 +277,17 @@ describe("bulkContentSchema", () => {
     expect(err).toMatch(/At least one thread/);
   });
 
-  test("threadIds with 100 items → valid (boundary)", () => {
-    const ids = Array.from({ length: 100 }, (_, i) => `id-${i}`);
+  test("threadIds with 1000 items → valid (boundary)", () => {
+    const ids = Array.from({ length: 1000 }, (_, i) => `id-${i}`);
     expect(
       bulkContentSchema.safeParse({ action: "lock_threads", threadIds: ids }).success
     ).toBe(true);
   });
 
-  test("threadIds with 101 items → error (above maximum)", () => {
-    const ids = Array.from({ length: 101 }, (_, i) => `id-${i}`);
+  test("threadIds with 1001 items → error (above maximum)", () => {
+    const ids = Array.from({ length: 1001 }, (_, i) => `id-${i}`);
     const err = issues(bulkContentSchema, { action: "lock_threads", threadIds: ids });
-    expect(err).toMatch(/Maximum 100 items/);
+    expect(err).toMatch(/Maximum 1000 items/);
   });
 
   test("threadIds containing empty string → error", () => {
@@ -388,22 +324,28 @@ describe("createFeatureFlagSchema", () => {
 
   test("key starting with digit → error (must start with letter)", () => {
     const err = issues(createFeatureFlagSchema, { key: "2flag", value: false });
-    expect(err).toMatch(/lowercase snake_case/);
+    expect(err).toMatch(/lowercase/i);
   });
 
   test("key with uppercase letters → error", () => {
     const err = issues(createFeatureFlagSchema, { key: "MyFlag", value: false });
-    expect(err).toMatch(/lowercase snake_case/);
+    expect(err).toMatch(/lowercase/i);
   });
 
-  test("key with hyphens → error (underscores only)", () => {
+  test("key with hyphens → error (underscores and dots only)", () => {
     const err = issues(createFeatureFlagSchema, { key: "my-flag", value: false });
-    expect(err).toMatch(/lowercase snake_case/);
+    expect(err).toMatch(/lowercase/i);
+  });
+
+  test("key with dots → valid (dots allowed for namespacing)", () => {
+    expect(
+      createFeatureFlagSchema.safeParse({ key: "forum.max_depth", value: true }).success
+    ).toBe(true);
   });
 
   test("key with spaces → error", () => {
     const err = issues(createFeatureFlagSchema, { key: "my flag", value: false });
-    expect(err).toMatch(/lowercase snake_case/);
+    expect(err).toMatch(/lowercase/i);
   });
 
   test("empty key → error", () => {

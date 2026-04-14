@@ -7,7 +7,14 @@ services:
       MYSQL_USER: ${MYSQL_USER:-civicforum}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-civicforum}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-civicforum}
-    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    command: >-
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --log-bin=mysql-bin
+      --binlog-format=ROW
+      --binlog-expire-logs-seconds=604800
+      --server-id=1
     volumes:
       - mysql_data:/var/lib/mysql
       - backup_volume:/backups
@@ -27,20 +34,27 @@ services:
       db:
         condition: service_healthy
     environment:
-      # Default to development — set NODE_ENV=production in .env for production deployments
+      # Default to development — override via env vars for production deployments
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 3000
       DATABASE_URL: mysql://${MYSQL_USER:-civicforum}:${MYSQL_PASSWORD:-civicforum}@db:3306/${MYSQL_DATABASE:-civicforum}
-      # REQUIRED in production: override these via .env file or shell environment.
-      # The application refuses to start in production if secrets are missing or weak.
-      JWT_SECRET: ${JWT_SECRET:-local-dev-jwt-secret-change-in-production-32chars-VALID-KEY-0123456789}
+      # Explicit DB connection parts for backup script (avoids brittle URL parsing)
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USER: ${MYSQL_USER:-civicforum}
+      DB_PASS: ${MYSQL_PASSWORD:-civicforum}
+      DB_NAME: ${MYSQL_DATABASE:-civicforum}
+      # Development defaults below let `docker compose up` work without .env.
+      # In production the app refuses to start if secrets are weak or missing
+      # (see src/lib/startup.ts). Override via env vars from your deployment system.
+      JWT_SECRET: ${JWT_SECRET:-local-dev-jwt-secret-do-not-use-in-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
       RATE_LIMIT_WRITE_PER_MIN: ${RATE_LIMIT_WRITE_PER_MIN:-120}
       RATE_LIMIT_READ_PER_MIN: ${RATE_LIMIT_READ_PER_MIN:-600}
       LOGIN_LOCKOUT_ATTEMPTS: ${LOGIN_LOCKOUT_ATTEMPTS:-5}
       LOGIN_LOCKOUT_WINDOW_MINUTES: ${LOGIN_LOCKOUT_WINDOW_MINUTES:-15}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-local-dev-internal-api-key-VALID-KEY-0123456789abcdef}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-local-dev-internal-key-do-not-use-in-prod}
     ports:
       - "3000:3000"
     healthcheck:

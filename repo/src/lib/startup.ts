@@ -19,11 +19,17 @@ export function isWeakSecret(value: string): boolean {
 }
 
 /**
- * Validates required environment configuration for production startup.
- * Throws an Error (instead of calling process.exit) so the logic is testable.
+ * Validates required environment configuration at startup.
+ *
+ * - production: throws (refuses to start) if secrets are missing or weak.
+ * - development / test: skips validation (dev defaults are tolerated).
+ * - any other NODE_ENV (e.g. staging): throws if secrets are weak, same as production.
  */
 export function validateStartupConfig(env: NodeJS.ProcessEnv): void {
-  if (env.NODE_ENV !== "production") return;
+  const nodeEnv = env.NODE_ENV ?? "development";
+
+  // Development and test environments tolerate weak/missing secrets
+  if (nodeEnv === "development" || nodeEnv === "test") return;
 
   const secret = env.JWT_SECRET ?? "";
   if (!secret || secret.length < 32 || isWeakSecret(secret)) {

@@ -17,6 +17,7 @@ const recycleBinInclude = {
       id: true,
       title: true,
       state: true,
+      isPinned: true,
       organizationId: true,
       sectionId: true,
     },

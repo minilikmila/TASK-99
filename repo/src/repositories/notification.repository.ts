@@ -63,11 +63,12 @@ export const notificationRepository = {
     });
   },
 
-  async markOpened(id: string, userId: string, openedAt: Date): Promise<void> {
-    await prisma.notification.updateMany({
+  async markOpened(id: string, userId: string, openedAt: Date): Promise<number> {
+    const result = await prisma.notification.updateMany({
       where: { id, userId },
       data: { status: NotificationStatus.OPENED, openedAt },
     });
+    return result.count;
   },
 
   async markFailed(

@@ -23,6 +23,7 @@ RESET='\033[0m'
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 COMPOSE_FILE="docker-compose.test.yml"
+COMPOSE_PROJECT="civicforum-test"
 
 # ─── Argument parsing ─────────────────────────────────────────────────────────
 RUN_UNIT=true
@@ -48,7 +49,7 @@ API_EXIT=0
 
 cleanup() {
   section "Stopping containers"
-  docker compose -f "$COMPOSE_FILE" --profile test down --volumes --timeout 10 \
+  docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" --profile test down --volumes --timeout 10 \
     >/dev/null 2>&1 && ok "Containers stopped" || warn "Container stop returned non-zero (ignored)"
 
   # ── Final summary ────────────────────────────────────────────────────────
@@ -91,14 +92,14 @@ trap cleanup EXIT
 
 # ─── Build ────────────────────────────────────────────────────────────────────
 section "Building test images"
-docker compose -f "$COMPOSE_FILE" --profile test build
+docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" --profile test build
 ok "Images built"
 
 # ─── Unit tests (containerized, no DB) ───────────────────────────────────────
 if $RUN_UNIT; then
   section "Running unit tests (containerized)"
   set +e
-  docker compose -f "$COMPOSE_FILE" run --rm --no-deps --entrypoint "" test-runner \
+  docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" run --rm --no-deps --entrypoint "" test-runner \
     npx jest --testPathPattern=unit_tests --verbose --forceExit
   UNIT_EXIT=$?
   set -e
@@ -115,7 +116,7 @@ if $RUN_API; then
   # docker compose run honours depends_on conditions: it starts db-test and
   # app-test, waits for their health checks, then executes the test command.
   set +e
-  docker compose -f "$COMPOSE_FILE" run --rm --entrypoint "" test-runner \
+  docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" run --rm --entrypoint "" test-runner \
     npx jest --testPathPattern=API_tests --verbose --forceExit --runInBand
   API_EXIT=$?
   set -e

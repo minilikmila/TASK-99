@@ -1,2 +1,8 @@
-.env
+
+# system files
 .DS_Store
+Thumbs.db
+
+# editor files
+.vscode/
+.idea/
